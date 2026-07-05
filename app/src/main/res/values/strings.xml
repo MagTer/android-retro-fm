@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Retro FM</string>
+    <string name="play">Spela</string>
+    <string name="pause">Pausa</string>
+    <string name="buffering">Laddar…</string>
+    <string name="playback_error">Uppspelningen kunde inte startas</string>
+    <string name="retry">Försök igen</string>
+</resources>

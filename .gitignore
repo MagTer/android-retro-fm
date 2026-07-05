@@ -1,0 +1,13 @@
+*.iml
+.gradle/
+.idea/
+.kotlin/
+local.properties
+captures/
+*.hprof
+
+build/
+app/build/
+
+# Log files
+*.log
