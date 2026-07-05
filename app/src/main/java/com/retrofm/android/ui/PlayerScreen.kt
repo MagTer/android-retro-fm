@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.retrofm.android.R
+import com.retrofm.android.core.R as CoreR
 
 @Composable
 fun PlayerScreen(viewModel: PlayerViewModel) {
@@ -128,8 +129,8 @@ private fun ArtworkImage(
         model = imageUrl,
         contentDescription = contentDescription,
         contentScale = ContentScale.Crop,
-        placeholder = painterResource(R.drawable.ic_notification),
-        error = painterResource(R.drawable.ic_notification),
+        placeholder = painterResource(CoreR.drawable.ic_notification),
+        error = painterResource(CoreR.drawable.ic_notification),
         modifier = modifier
     )
 }

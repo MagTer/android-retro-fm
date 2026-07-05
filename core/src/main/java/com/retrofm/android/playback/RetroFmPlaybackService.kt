@@ -14,12 +14,11 @@ import androidx.media3.session.SessionToken
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
-import com.retrofm.android.R
+import com.retrofm.android.core.R
 import com.retrofm.android.data.config.RetroFmConfig
 import com.retrofm.android.data.model.TrackInfo
 import com.retrofm.android.data.repository.NowPlayingRepository
 import com.retrofm.android.di.NetworkModule
-import com.retrofm.android.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,21 +45,25 @@ class RetroFmPlaybackService : MediaLibraryService() {
         playerManager = PlayerManager(this, serviceScope)
         playerManager.exoPlayer.addListener(PlaybackStateListener())
 
-        mediaLibrarySession = MediaLibrarySession.Builder(
+        val sessionBuilder = MediaLibrarySession.Builder(
             this,
             playerManager.exoPlayer,
             RetroFmMediaLibraryCallback()
         )
-            .setSessionActivity(
+        // Resolved by package at runtime rather than a compile-time Activity reference, since
+        // this class is shared between the phone module (has a launcher Activity) and the
+        // Android Automotive OS module (must not declare one).
+        packageManager.getLaunchIntentForPackage(packageName)?.let { launchIntent ->
+            sessionBuilder.setSessionActivity(
                 PendingIntent.getActivity(
                     this,
                     0,
-                    Intent(this, MainActivity::class.java)
-                        .setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                    launchIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
                     PendingIntent.FLAG_IMMUTABLE
                 )
             )
-            .build()
+        }
+        mediaLibrarySession = sessionBuilder.build()
 
         val notificationProvider = DefaultMediaNotificationProvider.Builder(this).build()
         notificationProvider.setSmallIcon(R.drawable.ic_notification)

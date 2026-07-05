@@ -26,14 +26,16 @@ En dedikerad Android-app för att lyssna på Retro FM utan att gå via aggregera
 Projektet kräver JDK 17 och Android SDK (API 36, build-tools 36.0.0).
 
 ```bash
-./gradlew :app:assembleDebug
+./gradlew :app:assembleDebug         # telefon + Android Auto
 ./gradlew :app:assembleRelease
+./gradlew :automotive:assembleDebug  # Android Automotive OS (inbyggd bilskärm)
+./gradlew :automotive:assembleRelease
 ```
 
 ## Tester
 
 ```bash
-./gradlew :app:testDebugUnitTest
+./gradlew :core:testDebugUnitTest
 ```
 
 ## Installera på enhet
@@ -45,11 +47,24 @@ adb shell am start -n com.retrofm.android/.ui.MainActivity
 
 ## Android Auto / Android Automotive OS
 
-Appen registrerar en `MediaBrowserService` och innehåller `automotive_app_desc.xml` så att den dyker upp som mediekälla i Android Auto och AAOS. För att testa i emulator:
+Appen registrerar en `MediaLibraryService` (Media3) så att den dyker upp som mediekälla i både
+Android Auto och Android Automotive OS — men det sker via två separata APK:er (`:app` resp.
+`:automotive`), eftersom en och samma artefakt inte kan stödja båda enligt Googles riktlinjer.
+Se `:automotive`-modulens README-avsnitt i projektstrukturen ovan för detaljer.
+
+**Android Auto** (telefon projicerad i bilens skärm): fungerar automatiskt när `:app` är
+installerad på telefonen och den ansluts till valfri bil med Android Auto-stöd — bilens eget
+operativsystem spelar ingen roll här.
+
+**Android Automotive OS** (appen körs inbyggt på bilens egen skärm, utan telefon), testa i emulator:
 
 1. Starta Android Automotive-emulatorn.
-2. Installera appen: `adb install app/build/outputs/apk/debug/app-debug.apk`.
+2. Installera den bilspecifika APK:n: `adb install automotive/build/outputs/apk/debug/automotive-debug.apk`.
 3. Öppna mediaspelaren i bil-UI och välj "Retro FM".
+
+Obs: riktiga bilar (t.ex. Volvos AAOS-enheter) blockerar ofta sideloading/utvecklarläge i
+produktion. Sideladdning fungerar bara i emulatorn; på riktig bil krävs Play Store-distribution
+via det dedikerade Automotive OS-spåret i Play Console.
 
 ## Konfiguration
 
@@ -57,8 +72,18 @@ Alla ström-URL:er, API-endpoints och stationsidentitet ligger i `app/src/main/j
 
 ## Projektstruktur
 
+Projektet är uppdelat i tre Gradle-moduler:
+
+- **`:core`** — delad kod: nätverk/data (`data/`, `di/`), uppspelning och `MediaLibraryService`
+  (`playback/`). Ingen UI, ingen launcher-activity. Används av både `:app` och `:automotive`.
+- **`:app`** — telefon-appen. Compose-UI, `MainActivity`, samt Android Auto-markörerna
+  (`com.google.android.gms.car.application`) i manifestet.
+- **`:automotive`** — Android Automotive OS-appen (körs inbyggt i bilens egen skärm, utan telefon).
+  Samma `applicationId` som `:app` för att dela en enda Play Store-notering, men eget manifest utan
+  launcher-activity, med `android.hardware.type.automotive` satt till `required="true"`.
+
 ```
-com.retrofm.android
+core/src/main/java/com/retrofm/android
 ├── data
 │   ├── api/RetroFmApi.kt
 │   ├── config/RetroFmConfig.kt
@@ -66,19 +91,23 @@ com.retrofm.android
 │   ├── model/TrackInfo.kt
 │   ├── repository/NowPlayingRepository.kt
 │   └── di/NetworkModule.kt
-├── playback
-│   ├── RetroFmPlaybackService.kt
-│   ├── MediaItemTree.kt
-│   └── PlayerManager.kt
+└── playback
+    ├── RetroFmPlaybackService.kt
+    ├── MediaItemTree.kt
+    └── PlayerManager.kt
+
+app/src/main/java/com/retrofm/android
 ├── ui
 │   ├── MainActivity.kt
 │   ├── PlayerScreen.kt
 │   └── PlayerViewModel.kt
-├── ui/theme
-│   ├── Color.kt
-│   ├── Theme.kt
-│   └── Type.kt
-└── RetroFmApplication.kt
+└── ui/theme
+    ├── Color.kt
+    ├── Theme.kt
+    └── Type.kt
+
+automotive/src/main
+└── AndroidManifest.xml   (ingen egen Kotlin-kod — allt kommer från :core)
 ```
 
 ## Noteringar

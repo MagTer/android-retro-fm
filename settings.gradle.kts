@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "Retro FM"
 include(":app")
+include(":core")
+include(":automotive")
