@@ -1,12 +1,17 @@
 package com.retrofm.android.playback
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import androidx.media3.cast.CastPlayer
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
@@ -24,9 +29,27 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
 
     private val exoPlayer: ExoPlayer = ExoPlayer.Builder(
         context,
-        DefaultMediaSourceFactory(context)
-            .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(6))
+        DefaultMediaSourceFactory(
+            DefaultDataSource.Factory(
+                context,
+                DefaultHttpDataSource.Factory()
+                    .setConnectTimeoutMs(RetroFmConfig.STREAM_CONNECT_TIMEOUT_MS)
+                    .setReadTimeoutMs(RetroFmConfig.STREAM_READ_TIMEOUT_MS)
+            )
+        ).setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(6))
     )
+        .setLoadControl(
+            // Live stream: the buffer can never grow beyond what the server has sent, so the
+            // only meaningful knobs are the start and resume thresholds (see RetroFmConfig).
+            DefaultLoadControl.Builder()
+                .setBufferDurationsMs(
+                    DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
+                    DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
+                    RetroFmConfig.BUFFER_FOR_PLAYBACK_MS,
+                    RetroFmConfig.BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS
+                )
+                .build()
+        )
         .setAudioAttributes(
             AudioAttributes.Builder()
                 .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -59,6 +82,21 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
         addListener(PlayerEventListener())
     }
 
+    private val connectivityManager =
+        context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+    // Also fires for the current network right at registration — harmless: with no player
+    // error and no pending reconnect, retryNowIfRecovering() is a no-op.
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            scope.launch { retryNowIfRecovering() }
+        }
+    }
+
+    init {
+        connectivityManager.registerDefaultNetworkCallback(networkCallback)
+    }
+
     fun play() {
         if (player.playbackState == Player.STATE_IDLE) {
             player.prepare()
@@ -75,6 +113,7 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
     }
 
     fun release() {
+        connectivityManager.unregisterNetworkCallback(networkCallback)
         reconnectJob?.cancel()
         // CastPlayer.release() also releases the wrapped local player (ExoPlayer supports
         // COMMAND_RELEASE), so releasing `player` alone is correct in both the cast and the
@@ -85,6 +124,20 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
     /** Swaps in updated metadata (title/artist/artwork) without interrupting the live stream. */
     fun updateMediaItem(item: MediaItem) {
         player.replaceMediaItem(0, item)
+    }
+
+    /**
+     * Connectivity came back: skip the remaining backoff and retry immediately instead of
+     * waiting out the timer. Only acts when an error interrupted actual playback — never
+     * re-opens the stream when the user had paused.
+     */
+    private fun retryNowIfRecovering() {
+        val waitingToReconnect = reconnectJob?.isActive == true || player.playerError != null
+        if (!waitingToReconnect || !wasPlayingBeforeError) return
+        reconnectJob?.cancel()
+        reconnectAttempts = 0
+        player.prepare()
+        player.play()
     }
 
     private fun scheduleReconnect() {

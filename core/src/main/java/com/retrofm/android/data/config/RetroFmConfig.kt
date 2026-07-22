@@ -23,4 +23,16 @@ object RetroFmConfig {
     /** Exponential backoff schedule for stream reconnect attempts after a player error. */
     val RECONNECT_BACKOFF_MS = listOf(1_000L, 2_000L, 5_000L, 10_000L, 30_000L)
     const val MAX_RECONNECT_ATTEMPTS = 5
+
+    /** Buffer required before playback starts — low so pressing play feels instant. */
+    const val BUFFER_FOR_PLAYBACK_MS = 1_000
+    /**
+     * Buffer required to resume after a stall. Deliberately high: on a poor connection this
+     * gives one longer pause instead of repeated micro-stalls, and falling ~10 s behind the
+     * live edge is imperceptible for radio.
+     */
+    const val BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 10_000
+    /** Tighter than ExoPlayer's 8 s defaults so a dead connection surfaces as an error fast. */
+    const val STREAM_CONNECT_TIMEOUT_MS = 5_000
+    const val STREAM_READ_TIMEOUT_MS = 5_000
 }
