@@ -1,5 +1,6 @@
 package com.retrofm.android.playback
 
+import android.util.Log
 import androidx.media3.cast.DefaultMediaItemConverter
 import androidx.media3.cast.MediaItemConverter
 import androidx.media3.common.MediaItem
@@ -40,8 +41,13 @@ class RetroFmMediaItemConverter : MediaItemConverter {
             .setAutoplay(defaultItem.autoplay)
             .apply { defaultItem.customData?.let { setCustomData(it) } }
             .build()
+            .also { Log.i(TAG, "LOAD payload: ${it.toJson()}") }
     }
 
     override fun toMediaItem(mediaQueueItem: MediaQueueItem): MediaItem =
         delegate.toMediaItem(mediaQueueItem)
+
+    private companion object {
+        const val TAG = "RetroFmCast"
+    }
 }

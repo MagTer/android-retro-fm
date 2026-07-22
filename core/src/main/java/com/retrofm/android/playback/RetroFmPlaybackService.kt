@@ -238,6 +238,14 @@ class RetroFmPlaybackService : MediaLibraryService() {
         }
 
         override fun onDeviceInfoChanged(deviceInfo: DeviceInfo) {
+            android.util.Log.i(
+                "RetroFmCast",
+                "route=${if (deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE) "REMOTE" else "LOCAL"} " +
+                    "state=${playerManager.player.playbackState} " +
+                    "playWhenReady=${playerManager.player.playWhenReady} " +
+                    "item=${playerManager.player.currentMediaItem?.localConfiguration?.uri} " +
+                    "error=${playerManager.player.playerError?.errorCodeName}"
+            )
             if (deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE) {
                 // Ad state tracks the LOCAL stream's ICY markers; the receiver opens its own
                 // session (with its own preroll we can neither detect nor mute). Clearing
