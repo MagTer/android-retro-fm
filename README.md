@@ -12,6 +12,8 @@ En dedikerad Android-app för att lyssna på Retro FM utan att gå via aggregera
 - Exponeras som mediekälla i Android Auto och Android Automotive OS.
 - Google Cast (Chromecast): casta strömmen till Chromecast/Nest-enheter (endast telefon-appen).
 - Återansluter automatiskt vid nätverksavbrott.
+- Detekterar serverinjicerad reklam och tystar den, med "Reklam"-nedräkning i UI:t
+  (kan stängas av via `RetroFmConfig.MUTE_ADS`).
 
 ## Teknikstack
 

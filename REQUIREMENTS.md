@@ -12,7 +12,10 @@ En dedikerad Android-app för att lyssna på **Retro FM** utan att gå via TuneI
 - Inget stöd för flera stationer i första versionen.
 - Ingen nedladdning/offline.
 - Ingen användarregistrering eller inloggning.
-- Ingen reklam i stationens egen ström kan tas bort — bara den reklam som kommer från tredjepartsappar.
+- Reklam i stationens egen ström kan inte tas bort ur strömmen — men sedan v1.0.1 detekteras
+  serverinjicerade reklamavbrott (AdsWizz ICY-markörer) och **tystas** medan UI:t visar "Reklam"
+  med nedräkning (`RetroFmConfig.MUTE_ADS`). Medvetet val för privat distribution till en
+  begränsad testkrets; ska stängas av vid bredare distribution.
 
 ---
 

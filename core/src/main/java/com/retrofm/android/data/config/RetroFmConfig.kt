@@ -24,6 +24,14 @@ object RetroFmConfig {
     val RECONNECT_BACKOFF_MS = listOf(1_000L, 2_000L, 5_000L, 10_000L, 30_000L)
     const val MAX_RECONNECT_ATTEMPTS = 5
 
+    /**
+     * Mute the player while a server-spliced ad (see IcyAdMarker) is playing. The UI keeps
+     * showing the "Reklam" countdown so the silence is explained. Deliberate decision for the
+     * private friends-and-family distribution (2026-07-22); flip to false if the app is ever
+     * distributed more widely, since this suppresses the station's own monetization.
+     */
+    const val MUTE_ADS = true
+
     /** Buffer required before playback starts — low so pressing play feels instant. */
     const val BUFFER_FOR_PLAYBACK_MS = 1_000
     /**

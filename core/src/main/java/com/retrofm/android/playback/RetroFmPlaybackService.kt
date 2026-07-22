@@ -53,6 +53,8 @@ class RetroFmPlaybackService : MediaLibraryService() {
     private var metadataJob: Job? = null
     private var lastAppliedEventId: Long? = null
     private var adUntilElapsedMs: Long? = null
+    private var adUnmuteJob: Job? = null
+    private var preAdVolume: Float? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -186,17 +188,38 @@ class RetroFmPlaybackService : MediaLibraryService() {
     /**
      * Publishes "an ad is playing until X" to all controllers via session extras. The deadline
      * is on the [SystemClock.elapsedRealtime] clock (monotonic, shared across processes).
+     * With [RetroFmConfig.MUTE_ADS] the player is also muted (app-internal volume, not the
+     * device volume) until the announced duration elapses or regular track metadata arrives.
      */
     private fun setAdState(untilElapsedMs: Long) {
         adUntilElapsedMs = untilElapsedMs
         mediaLibrarySession.setSessionExtras(
             Bundle().apply { putLong(EXTRA_AD_UNTIL_ELAPSED_MS, untilElapsedMs) }
         )
+        if (RetroFmConfig.MUTE_ADS) {
+            // Back-to-back ads re-announce themselves: only capture the volume on the first,
+            // so a mid-break marker can't overwrite the saved level with our own 0.
+            if (preAdVolume == null) {
+                preAdVolume = playerManager.player.volume
+                playerManager.player.volume = 0f
+            }
+            adUnmuteJob?.cancel()
+            adUnmuteJob = serviceScope.launch {
+                delay(untilElapsedMs - SystemClock.elapsedRealtime())
+                // Fallback unmute at the announced deadline; usually the ad-end metadata
+                // (clearAdState via onMetadata) lands first or shortly after.
+                clearAdState()
+            }
+        }
     }
 
     private fun clearAdState() {
         if (adUntilElapsedMs == null) return
         adUntilElapsedMs = null
+        adUnmuteJob?.cancel()
+        adUnmuteJob = null
+        preAdVolume?.let { playerManager.player.volume = it }
+        preAdVolume = null
         mediaLibrarySession.setSessionExtras(Bundle())
     }
 
