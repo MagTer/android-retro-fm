@@ -3,6 +3,7 @@ package com.retrofm.android.playback
 import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.MimeTypes
 import com.retrofm.android.data.config.RetroFmConfig
 
 object MediaItemTree {
@@ -25,6 +26,9 @@ object MediaItemTree {
     private val stationMediaItem: MediaItem = MediaItem.Builder()
         .setMediaId(STATION_ID)
         .setUri(RetroFmConfig.STREAM_URL_MP3)
+        // Mandatory for casting: the Media3 cast item converter throws on a MediaItem with no
+        // mimeType. Harmless locally — ExoPlayer already sniffs the MP3 stream.
+        .setMimeType(MimeTypes.AUDIO_MPEG)
         .setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(RetroFmConfig.STATION_NAME)

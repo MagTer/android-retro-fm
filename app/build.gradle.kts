@@ -64,6 +64,12 @@ dependencies {
     // implementation itself lives in :core.
     implementation("androidx.media3:media3-session:1.10.1")
 
+    // Google Cast: the MediaRouteButton (chooser/controller) plus the themed context its
+    // dialogs inflate against. play-services-cast-framework arrives transitively via
+    // :core's media3-cast. Cast is activated by the manifest meta-data in this module only.
+    implementation("androidx.mediarouter:mediarouter:1.7.0")
+    implementation("androidx.appcompat:appcompat:1.7.1")
+
     implementation("io.coil-kt.coil3:coil-compose:3.5.0")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.5.0")
 

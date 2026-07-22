@@ -43,11 +43,13 @@ class RetroFmPlaybackService : MediaLibraryService() {
     override fun onCreate() {
         super.onCreate()
         playerManager = PlayerManager(this, serviceScope)
-        playerManager.exoPlayer.addListener(PlaybackStateListener())
+        // playerManager.player is the unified CastPlayer on the phone build (local+remote),
+        // or plain ExoPlayer where Cast is unavailable — see PlayerManager.player.
+        playerManager.player.addListener(PlaybackStateListener())
 
         val sessionBuilder = MediaLibrarySession.Builder(
             this,
-            playerManager.exoPlayer,
+            playerManager.player,
             RetroFmMediaLibraryCallback()
         )
         // Resolved by package at runtime rather than a compile-time Activity reference, since

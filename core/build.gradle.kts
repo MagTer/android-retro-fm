@@ -24,6 +24,10 @@ dependencies {
 
     implementation("androidx.media3:media3-exoplayer:1.10.1")
     implementation("androidx.media3:media3-session:1.10.1")
+    // Unified local+remote player (CastPlayer.Builder). Cast is only *activated* by the
+    // OPTIONS_PROVIDER_CLASS_NAME meta-data in :app; on :automotive CastContext init throws
+    // and PlayerManager falls back to plain ExoPlayer (see PlayerManager.player).
+    implementation("androidx.media3:media3-cast:1.10.1")
 
     implementation("com.squareup.retrofit2:retrofit:2.12.0")
     implementation("com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:1.0.0")
