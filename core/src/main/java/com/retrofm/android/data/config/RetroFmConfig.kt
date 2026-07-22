@@ -32,6 +32,17 @@ object RetroFmConfig {
      */
     const val MUTE_ADS = true
 
+    /**
+     * Compensation for the station's metadata lead. Icecast splices ICY metadata into the
+     * byte stream at the wall-clock moment the studio switches tracks, but the matching audio
+     * passes the same stream position only after the studio→encoder→ingest pipeline — so in
+     * the stream, metadata runs a few constant seconds ahead of the audible transition.
+     * ExoPlayer already presents ICY at the buffer-corrected playback position; this delay
+     * covers only the upstream lead. Calibrate by ear: title flips N s before you hear the
+     * new song → increase by N; flips after → decrease.
+     */
+    const val ICY_UPSTREAM_LEAD_MS = 6_000L
+
     /** Buffer required before playback starts — low so pressing play feels instant. */
     const val BUFFER_FOR_PLAYBACK_MS = 1_000
     /**

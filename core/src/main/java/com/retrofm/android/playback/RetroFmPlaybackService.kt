@@ -152,7 +152,9 @@ class RetroFmPlaybackService : MediaLibraryService() {
 
     private fun parseEventTimeMillis(value: String): Long? = try {
         val format = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
+            // Verified against live fetches 2026-07-22: the API's event timestamps are
+            // Swedish local time, not UTC.
+            timeZone = TimeZone.getTimeZone("Europe/Stockholm")
         }
         format.parse(value)?.time
     } catch (e: ParseException) {
@@ -270,16 +272,19 @@ class RetroFmPlaybackService : MediaLibraryService() {
         stopMetadataPolling()
 
         val eventId = IcyAdMarker.parseEventId(icy.url)
-        if (eventId != null && eventId > 0) {
-            serviceScope.launch {
-                nowPlayingRepository.fetchEventData(eventId).fold(
-                    onSuccess = { applyTrackMetadata(it) },
-                    onFailure = { applyTrackMetadata(trackFromStreamTitle(icy, eventId)) }
-                )
+        serviceScope.launch {
+            val track = if (eventId != null && eventId > 0) {
+                nowPlayingRepository.fetchEventData(eventId)
+                    .getOrElse { trackFromStreamTitle(icy, eventId) }
+            } else {
+                // eventdata/-1 (or no url): nothing is on — news, jingles, between events.
+                NowPlayingRepository.stationFallback(eventId ?: -1L)
             }
-        } else {
-            // eventdata/-1 (or no url): nothing is on — news, jingles, between events.
-            applyTrackMetadata(NowPlayingRepository.stationFallback(eventId ?: -1L))
+            // Fetch first, then hold: compensates the station-side metadata lead (see
+            // RetroFmConfig.ICY_UPSTREAM_LEAD_MS). Launch order on the Main dispatcher
+            // preserves boundary order for back-to-back events.
+            delay(RetroFmConfig.ICY_UPSTREAM_LEAD_MS)
+            applyTrackMetadata(track)
         }
     }
 
