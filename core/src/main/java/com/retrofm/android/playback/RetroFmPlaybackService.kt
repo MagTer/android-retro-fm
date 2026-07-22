@@ -3,6 +3,7 @@ package com.retrofm.android.playback
 import android.app.PendingIntent
 import android.content.Intent
 import android.net.Uri
+import androidx.media3.common.DeviceInfo
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -138,6 +139,16 @@ class RetroFmPlaybackService : MediaLibraryService() {
 
     private fun applyTrackMetadata(track: TrackInfo) {
         if (track.eventId == lastAppliedEventId) return
+
+        // CAST-PLAN §2.4 (WP2): while casting, replaceMediaItem can translate to a queue
+        // reload on the receiver, producing an audible gap on every track change. Skip the
+        // in-place update on the remote route and accept static "Retro FM" branding on the
+        // receiver (and phone UI) for v1. lastAppliedEventId is left untouched so the current
+        // track is applied as soon as playback returns to the local route. Revisit once this
+        // can be verified on real cast hardware (Phase 4, step 9).
+        if (playerManager.player.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE) {
+            return
+        }
         lastAppliedEventId = track.eventId
 
         val item = MediaItemTree.getStationItem()
