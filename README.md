@@ -67,6 +67,35 @@ Obs: riktiga bilar (t.ex. Volvos AAOS-enheter) blockerar ofta sideloading/utveck
 produktion. Sideladdning fungerar bara i emulatorn; på riktig bil krävs Play Store-distribution
 via det dedikerade Automotive OS-spåret i Play Console.
 
+## Signering och release (Google Play)
+
+Google Play kräver Android App Bundle (AAB). Bygg det med:
+
+```bash
+./gradlew :app:bundleRelease
+```
+
+`:app` har en signaturkonfiguration (`signingConfigs.release`) som läser uppgifter från
+Gradle-properties — **inga hemligheter ligger i repot**. Utan properties byggs release-artefakten
+osignerad (användbart för R8-/bundle-verifiering). Lägg uppgifterna i `~/.gradle/gradle.properties`
+(utanför repot) eller skicka dem som `-P`-flaggor/miljövariabler:
+
+```properties
+RETROFM_UPLOAD_STORE_FILE=/absolut/sokvag/till/upload-keystore.jks
+RETROFM_UPLOAD_STORE_PASSWORD=…
+RETROFM_UPLOAD_KEY_ALIAS=upload
+RETROFM_UPLOAD_KEY_PASSWORD=…
+```
+
+Skapa upload-nyckeln själv (genereras aldrig av bygget) och förvara den utanför repot:
+
+```bash
+keytool -genkeypair -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 \
+    -validity 10000 -alias upload
+```
+
+Aktivera Play App Signing vid första uppladdningen (standard i Play Console).
+
 ## Konfiguration
 
 Alla ström-URL:er, API-endpoints och stationsidentitet ligger i `app/src/main/java/com/retrofm/android/data/config/RetroFmConfig.kt`.
@@ -113,5 +142,5 @@ automotive/src/main
 
 ## Noteringar
 
-- Release-APK:n är osignerad. För publicering på Google Play behöver du lägga till en signaturkonfiguration i `app/build.gradle.kts`.
+- Utan upload-uppgifter (se "Signering och release" ovan) byggs release-artefakten osignerad. Med uppgifterna signeras den automatiskt.
 - Retro FM-logotyp och ström tillhör Bauer Media. Appen är avsedd för personligt bruk.

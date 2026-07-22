@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Adaptive-icon background = station brand colour (#000F2B). -->
+    <color name="ic_launcher_background">#000F2B</color>
+</resources>

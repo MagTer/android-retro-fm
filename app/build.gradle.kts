@@ -20,6 +20,22 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        // Upload signing for Play. Credentials come from Gradle properties (e.g.
+        // ~/.gradle/gradle.properties) or env vars, never from the repo. When
+        // RETROFM_UPLOAD_STORE_FILE is absent the config stays empty and the release
+        // build is produced UNSIGNED — do not generate a keystore or commit secrets here.
+        create("release") {
+            val storeFilePath = project.findProperty("RETROFM_UPLOAD_STORE_FILE") as String?
+            if (storeFilePath != null) {
+                storeFile = file(storeFilePath)
+                storePassword = project.findProperty("RETROFM_UPLOAD_STORE_PASSWORD") as String?
+                keyAlias = project.findProperty("RETROFM_UPLOAD_KEY_ALIAS") as String?
+                keyPassword = project.findProperty("RETROFM_UPLOAD_KEY_PASSWORD") as String?
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -28,6 +44,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Sign only when upload credentials are provided; otherwise leave the release
+            // unsigned so the build still succeeds for R8/bundle verification.
+            if (project.hasProperty("RETROFM_UPLOAD_STORE_FILE")) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
