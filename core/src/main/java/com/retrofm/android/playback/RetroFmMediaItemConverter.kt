@@ -20,7 +20,13 @@ class RetroFmMediaItemConverter : MediaItemConverter {
     override fun toMediaQueueItem(mediaItem: MediaItem): MediaQueueItem {
         val defaultItem = delegate.toMediaQueueItem(mediaItem)
         val info = requireNotNull(defaultItem.media)
-        val liveInfo = MediaInfo.Builder(info.contentId)
+        // contentId must be the actual stream URL: the Default Media Receiver treats
+        // contentId as the media URL and may ignore the newer contentUrl field — with the
+        // default conversion it tried to load the literal mediaId "retro_fm_station"
+        // (observed: session connects, volume works, media loads forever). The Media3
+        // round-trip (toMediaItem) is unaffected: it restores the MediaItem from customData.
+        val contentId = mediaItem.localConfiguration?.uri?.toString() ?: info.contentId
+        val liveInfo = MediaInfo.Builder(contentId)
             .setStreamType(MediaInfo.STREAM_TYPE_LIVE)
             .setStreamDuration(MediaInfo.UNKNOWN_DURATION)
             .setContentType(info.contentType ?: "audio/mpeg")
