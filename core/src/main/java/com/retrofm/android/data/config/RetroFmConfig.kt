@@ -38,10 +38,11 @@ object RetroFmConfig {
      * passes the same stream position only after the studio→encoder→ingest pipeline — so in
      * the stream, metadata runs a few constant seconds ahead of the audible transition.
      * ExoPlayer already presents ICY at the buffer-corrected playback position; this delay
-     * covers only the upstream lead. Calibrate by ear: title flips N s before you hear the
-     * new song → increase by N; flips after → decrease.
+     * covers only the upstream lead. Calibrated by ear 2026-07-22: with 6 s the info lagged
+     * the audible change by ~6 s → the lead is ~0 for this stream. Kept as a knob; if the
+     * title starts flipping N s early again, set this to N * 1000.
      */
-    const val ICY_UPSTREAM_LEAD_MS = 6_000L
+    const val ICY_UPSTREAM_LEAD_MS = 0L
 
     /** Buffer required before playback starts — low so pressing play feels instant. */
     const val BUFFER_FOR_PLAYBACK_MS = 1_000
