@@ -103,8 +103,16 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
 
                 Spacer(modifier = Modifier.height(32.dp))
 
+                // During a server-spliced ad the track metadata describes what's on air, not
+                // what we're hearing — show the ad label and countdown instead.
+                val adSeconds = uiState.adSecondsRemaining
+
                 Text(
-                    text = uiState.trackTitle,
+                    text = if (adSeconds != null) {
+                        stringResource(R.string.ad_label)
+                    } else {
+                        uiState.trackTitle
+                    },
                     style = MaterialTheme.typography.headlineMedium,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth()
@@ -113,7 +121,11 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = uiState.artistName,
+                    text = if (adSeconds != null) {
+                        stringResource(R.string.ad_countdown, adSeconds)
+                    } else {
+                        uiState.artistName
+                    },
                     style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth()

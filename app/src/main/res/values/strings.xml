@@ -6,4 +6,6 @@
     <string name="retry">Försök igen</string>
     <string name="cast_button">Casta</string>
     <string name="casting_to">Castar till %1$s</string>
+    <string name="ad_label">Reklam</string>
+    <string name="ad_countdown">Sändningen börjar om %1$d s</string>
 </resources>

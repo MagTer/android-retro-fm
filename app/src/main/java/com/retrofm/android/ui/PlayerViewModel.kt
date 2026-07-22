@@ -2,8 +2,11 @@ package com.retrofm.android.ui
 
 import android.app.Application
 import android.content.ComponentName
+import android.os.Bundle
+import android.os.SystemClock
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import androidx.media3.common.DeviceInfo
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -16,9 +19,12 @@ import com.google.common.util.concurrent.MoreExecutors
 import com.retrofm.android.R
 import com.retrofm.android.data.config.RetroFmConfig
 import com.retrofm.android.playback.RetroFmPlaybackService
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 @Immutable
 data class PlayerUiState(
@@ -29,7 +35,9 @@ data class PlayerUiState(
     val imageUrl: String? = RetroFmConfig.LOGO_PNG_URL,
     val errorMessage: String? = null,
     /** Friendly name of the active Cast device while casting; null when playing locally. */
-    val castDeviceName: String? = null
+    val castDeviceName: String? = null,
+    /** Seconds left of a server-spliced ad ("Reklam" countdown); null when no ad is playing. */
+    val adSecondsRemaining: Int? = null
 )
 
 class PlayerViewModel(application: Application) : AndroidViewModel(application) {
@@ -42,7 +50,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val controllerFuture: ListenableFuture<MediaController> = MediaController.Builder(
         application,
         SessionToken(application, ComponentName(application, RetroFmPlaybackService::class.java))
-    ).buildAsync()
+    )
+        .setListener(SessionListener())
+        .buildAsync()
 
     init {
         controllerFuture.addListener({
@@ -50,6 +60,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             mediaController = controller
             controller.addListener(PlayerListener())
             updateFromController(controller)
+            // Catch up on an ad already in progress when the UI (re)connects mid-countdown.
+            onAdExtrasChanged(controller.sessionExtras)
         }, MoreExecutors.directExecutor())
     }
 
@@ -128,4 +140,34 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         CastContext.getSharedInstance(getApplication())
             .sessionManager.currentCastSession?.castDevice?.friendlyName
     }.getOrNull()
+
+    private var adCountdownJob: Job? = null
+
+    private inner class SessionListener : MediaController.Listener {
+        override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
+            onAdExtrasChanged(extras)
+        }
+    }
+
+    /** Ticks the "Reklam" countdown against the elapsedRealtime deadline from the service. */
+    private fun onAdExtrasChanged(extras: Bundle) {
+        val untilElapsedMs = extras.getLong(RetroFmPlaybackService.EXTRA_AD_UNTIL_ELAPSED_MS, 0L)
+        adCountdownJob?.cancel()
+        adCountdownJob = if (untilElapsedMs <= SystemClock.elapsedRealtime()) {
+            _uiState.value = _uiState.value.copy(adSecondsRemaining = null)
+            null
+        } else {
+            viewModelScope.launch {
+                while (true) {
+                    val remainingMs = untilElapsedMs - SystemClock.elapsedRealtime()
+                    if (remainingMs <= 0) break
+                    _uiState.value = _uiState.value.copy(
+                        adSecondsRemaining = ((remainingMs + 999) / 1000).toInt()
+                    )
+                    delay(250)
+                }
+                _uiState.value = _uiState.value.copy(adSecondsRemaining = null)
+            }
+        }
+    }
 }

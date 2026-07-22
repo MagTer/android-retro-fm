@@ -3,10 +3,14 @@ package com.retrofm.android.playback
 import android.app.PendingIntent
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
+import android.os.SystemClock
 import androidx.media3.common.DeviceInfo
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Metadata
 import androidx.media3.common.Player
+import androidx.media3.extractor.metadata.icy.IcyInfo
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
@@ -35,11 +39,20 @@ import java.util.TimeZone
 
 class RetroFmPlaybackService : MediaLibraryService() {
 
+    companion object {
+        /**
+         * Session-extras key: [SystemClock.elapsedRealtime] deadline until which a spliced-in
+         * ad is playing. Absent when no ad is active.
+         */
+        const val EXTRA_AD_UNTIL_ELAPSED_MS = "com.retrofm.android.EXTRA_AD_UNTIL_ELAPSED_MS"
+    }
+
     private lateinit var playerManager: PlayerManager
     private lateinit var mediaLibrarySession: MediaLibrarySession
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var metadataJob: Job? = null
     private var lastAppliedEventId: Long? = null
+    private var adUntilElapsedMs: Long? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -170,12 +183,48 @@ class RetroFmPlaybackService : MediaLibraryService() {
         playerManager.updateMediaItem(item)
     }
 
+    /**
+     * Publishes "an ad is playing until X" to all controllers via session extras. The deadline
+     * is on the [SystemClock.elapsedRealtime] clock (monotonic, shared across processes).
+     */
+    private fun setAdState(untilElapsedMs: Long) {
+        adUntilElapsedMs = untilElapsedMs
+        mediaLibrarySession.setSessionExtras(
+            Bundle().apply { putLong(EXTRA_AD_UNTIL_ELAPSED_MS, untilElapsedMs) }
+        )
+    }
+
+    private fun clearAdState() {
+        if (adUntilElapsedMs == null) return
+        adUntilElapsedMs = null
+        mediaLibrarySession.setSessionExtras(Bundle())
+    }
+
     private inner class PlaybackStateListener : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) {
                 startMetadataPolling()
             } else {
                 stopMetadataPolling()
+                // A paused live stream resumes at the live edge, where this ad is over.
+                clearAdState()
+            }
+        }
+
+        // ICY in-stream metadata: the server announces spliced-in ads (preroll at connect,
+        // midrolls in the same format) with an adw_ad marker and their exact duration — see
+        // IcyAdMarker. Regular track metadata doubles as the ad-end signal, which also covers
+        // the deadline drifting late when playback stalls mid-ad. Only fires on the local
+        // route: while casting the receiver fetches the stream itself, so no false labels.
+        override fun onMetadata(metadata: Metadata) {
+            for (i in 0 until metadata.length()) {
+                val icy = metadata.get(i) as? IcyInfo ?: continue
+                val durationMs = IcyAdMarker.parseDurationMs(icy.rawMetadata)
+                if (durationMs != null) {
+                    setAdState(SystemClock.elapsedRealtime() + durationMs)
+                } else {
+                    clearAdState()
+                }
             }
         }
     }
