@@ -95,9 +95,9 @@ class RetroFmPlaybackService : MediaLibraryService() {
         notificationProvider.setSmallIcon(R.drawable.ic_notification)
         setMediaNotificationProvider(notificationProvider)
 
-        // One-shot fetch so the UI has metadata before playback starts; the poll loop
-        // itself only runs while actively playing (see PlaybackStateListener).
-        fetchNowPlayingOnce()
+        // No metadata prefetch here: while idle the session shows the station branding from
+        // MediaItemTree, and once audio actually plays the ICY pipeline applies the track
+        // that is being heard. A prefetch would show a song the user isn't hearing.
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession {
@@ -110,12 +110,6 @@ class RetroFmPlaybackService : MediaLibraryService() {
         mediaLibrarySession.release()
         playerManager.release()
         super.onDestroy()
-    }
-
-    private fun fetchNowPlayingOnce() {
-        serviceScope.launch {
-            nowPlayingRepository.fetchNowPlaying().onSuccess { track -> applyTrackMetadata(track) }
-        }
     }
 
     private fun startMetadataPolling() {

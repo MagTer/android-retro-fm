@@ -33,7 +33,9 @@ object MediaItemTree {
             MediaMetadata.Builder()
                 .setTitle(RetroFmConfig.STATION_NAME)
                 .setSubtitle(RetroFmConfig.STATION_STRAPLINE)
-                .setArtist(RetroFmConfig.STATION_NAME)
+                // Strapline, not the station name again — the UI/notification render this as
+                // the second line under the title.
+                .setArtist(RetroFmConfig.STATION_STRAPLINE)
                 .setIsBrowsable(false)
                 .setIsPlayable(true)
                 .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
