@@ -14,8 +14,11 @@ object RetroFmConfig {
     const val API_BASE_URL =
         "https://listenapi.planetradio.co.uk/api9.2/"
 
+    // The station's lock-screen asset: same artwork as the "logo" rendition but 1200x1200.
+    // The original logo URL (…/v1588755887/…/ujznetkonskklgdql1yd.png) serves only 47x40 and
+    // looks blocky anywhere bigger than a list row; the CDN refuses upscaling parameters.
     const val LOGO_PNG_URL =
-        "https://media.bauerradio.com/image/upload/c_crop,g_custom/v1588755887/brand_manager/stations/ujznetkonskklgdql1yd.png"
+        "https://media.bauerradio.com/image/upload/c_crop,g_custom/v1592840994/brand_manager/stations/dwxxo0kehcboelrutfnm.png"
 
     const val METADATA_POLL_INTERVAL_MS = 30_000L
     const val METADATA_POLL_MIN_INTERVAL_MS = 2_000L
