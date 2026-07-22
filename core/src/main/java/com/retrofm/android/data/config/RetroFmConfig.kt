@@ -40,6 +40,15 @@ object RetroFmConfig {
     const val AD_MUTE_TAIL_MS = 2_000L
 
     /**
+     * Delay before auto-seeking a freshly connected Cast receiver to the live edge. The
+     * transfer hands the receiver the local playback position, which an unseekable Icecast
+     * stream can't honor — the receiver stalls until something seeks it to the live edge
+     * (field-tested: a manual pause/resume unstuck it). Long enough for the LOAD to settle,
+     * short enough to feel like normal connect time.
+     */
+    const val CAST_LIVE_EDGE_NUDGE_DELAY_MS = 2_000L
+
+    /**
      * Compensation for the station's metadata lead. Icecast splices ICY metadata into the
      * byte stream at the wall-clock moment the studio switches tracks, but the matching audio
      * passes the same stream position only after the studio→encoder→ingest pipeline — so in

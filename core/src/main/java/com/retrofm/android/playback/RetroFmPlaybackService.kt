@@ -252,6 +252,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
                 // also restores the volume, so a mute active at transfer can't leave the
                 // receiver stuck at volume 0.
                 clearAdState()
+                nudgeCastToLiveEdge()
             }
         }
 
@@ -274,6 +275,27 @@ class RetroFmPlaybackService : MediaLibraryService() {
                     clearAdState()
                     onIcyTrackMetadata(icy)
                 }
+            }
+        }
+    }
+
+    /**
+     * The transfer to a Cast receiver carries the local playback position, which the
+     * unseekable live stream can't honor — the receiver stalls buffering until seeked to the
+     * live edge (exactly what a manual pause/resume did). If the receiver hasn't started
+     * playing shortly after the transfer, seek it to the live edge automatically.
+     */
+    private fun nudgeCastToLiveEdge() {
+        serviceScope.launch {
+            delay(RetroFmConfig.CAST_LIVE_EDGE_NUDGE_DELAY_MS)
+            val player = playerManager.player
+            val stillStuckOnRemote =
+                player.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE &&
+                    player.playWhenReady && !player.isPlaying
+            if (stillStuckOnRemote) {
+                android.util.Log.i("RetroFmCast", "receiver stuck after transfer — seeking live edge")
+                player.seekToDefaultPosition()
+                player.play()
             }
         }
     }
