@@ -1,6 +1,7 @@
 package com.retrofm.android.playback
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.Network
 import androidx.media3.cast.CastPlayer
@@ -71,11 +72,20 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
      * All playback control is routed through this property: when not casting, [CastPlayer]
      * delegates to the wrapped [exoPlayer]; when casting, it targets the receiver.
      */
-    val player: Player = try {
-        CastPlayer.Builder(context).setLocalPlayer(exoPlayer).build()
-    } catch (e: Exception) {
-        // No Play services / no cast meta-data (e.g. :automotive) → local-only.
+    val player: Player = if (
+        context.packageManager.hasSystemFeature(PackageManager.FEATURE_AUTOMOTIVE)
+    ) {
+        // Never probe Cast on Automotive OS — the phone APK can be installed in cars via the
+        // Play device catalog, and the cast framework then nags about the car's Play services
+        // version. Casting from a car makes no sense anyway.
         exoPlayer
+    } else {
+        try {
+            CastPlayer.Builder(context).setLocalPlayer(exoPlayer).build()
+        } catch (e: Exception) {
+            // No Play services / no cast meta-data (e.g. :automotive) → local-only.
+            exoPlayer
+        }
     }.apply {
         setMediaItem(MediaItemTree.getStationItem())
         playWhenReady = false

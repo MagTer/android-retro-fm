@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -39,6 +40,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.mediarouter.app.MediaRouteButton
+import android.content.pm.PackageManager
 import android.view.ContextThemeWrapper
 import coil3.compose.AsyncImage
 import com.google.android.gms.cast.framework.CastButtonFactory
@@ -52,9 +54,12 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     // Only show the cast button where CastContext initialized (Play services + cast meta-data);
-    // on devices without Google Play services the button simply doesn't appear.
+    // on devices without Google Play services the button simply doesn't appear. Skipped
+    // entirely on Automotive OS: probing cast there makes the framework nag about the car's
+    // Play services version, and casting from a car makes no sense anyway.
     val isCastAvailable = remember {
-        runCatching { CastContext.getSharedInstance(context) }.isSuccess
+        !context.packageManager.hasSystemFeature(PackageManager.FEATURE_AUTOMOTIVE) &&
+            runCatching { CastContext.getSharedInstance(context) }.isSuccess
     }
 
     LaunchedEffect(uiState.errorMessage) {
@@ -96,6 +101,9 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
                     imageUrl = uiState.imageUrl,
                     contentDescription = uiState.trackTitle,
                     modifier = Modifier
+                        // Cap the artwork so large screens (tablets, car head units) don't
+                        // blow it up to fill the width.
+                        .widthIn(max = 360.dp)
                         .fillMaxWidth(0.75f)
                         .aspectRatio(1f)
                         .clip(RoundedCornerShape(16.dp))
@@ -201,12 +209,12 @@ private fun PlayPauseButton(
     val bufferingDescription = stringResource(R.string.buffering)
     Box(
         contentAlignment = Alignment.Center,
-        modifier = Modifier.size(80.dp)
+        modifier = Modifier.size(96.dp)
     ) {
         if (isBuffering) {
             CircularProgressIndicator(
                 modifier = Modifier
-                    .size(64.dp)
+                    .size(80.dp)
                     .semantics { contentDescription = bufferingDescription },
                 color = MaterialTheme.colorScheme.primary
             )

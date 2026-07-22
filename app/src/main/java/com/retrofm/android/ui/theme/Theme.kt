@@ -1,12 +1,13 @@
 package com.retrofm.android.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 
-private val DarkColorScheme = darkColorScheme(
+// Single brand scheme regardless of the system light/dark setting: the station identity is
+// dark navy, and following the system (e.g. a car UI in day mode) produced a white screen
+// that matches neither the brand nor the artwork.
+private val BrandColorScheme = darkColorScheme(
     primary = BrandLight,
     secondary = BrandGray,
     tertiary = BrandGray,
@@ -18,27 +19,10 @@ private val DarkColorScheme = darkColorScheme(
     onSurface = BrandLight
 )
 
-private val LightColorScheme = lightColorScheme(
-    primary = BrandDarkBlue,
-    secondary = BrandGray,
-    tertiary = BrandGray,
-    background = BrandLight,
-    surface = BrandLight,
-    onPrimary = BrandLight,
-    onSecondary = BrandDarkBlue,
-    onBackground = BrandDarkBlue,
-    onSurface = BrandDarkBlue
-)
-
 @Composable
-fun RetroFMTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    content: @Composable () -> Unit
-) {
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
-
+fun RetroFMTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = colorScheme,
+        colorScheme = BrandColorScheme,
         typography = Typography,
         content = content
     )
