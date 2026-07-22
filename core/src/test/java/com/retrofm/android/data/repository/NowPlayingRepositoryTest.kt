@@ -2,6 +2,7 @@ package com.retrofm.android.data.repository
 
 import com.retrofm.android.data.api.RetroFmApi
 import com.retrofm.android.data.config.RetroFmConfig
+import com.retrofm.android.data.model.EventDataResponse
 import com.retrofm.android.data.model.NowPlayingResponse
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -39,12 +40,34 @@ class NowPlayingRepositoryTest {
                 )
             )
         }
+
+        override suspend fun getEventData(eventId: Long): EventDataResponse {
+            return EventDataResponse(
+                eventId = eventId,
+                eventStart = "2026-07-22 15:34:24",
+                eventFinish = "2026-07-22 15:38:54",
+                eventType = "Song",
+                eventSongTitle = "Kyrie",
+                eventSongArtist = "Mr. Mister",
+                eventImageUrl = "https://assets.planetradio.co.uk/artist/1-1/320x320/1809.jpg"
+            )
+        }
     }
 
     private fun fakeApiReturning(response: NowPlayingResponse) = object : RetroFmApi {
         override suspend fun getNowPlaying(): NowPlayingResponse = response
         override suspend fun getRecentPlaylist(stationCode: String): List<NowPlayingResponse> =
             listOf(response)
+        override suspend fun getEventData(eventId: Long): EventDataResponse =
+            error("not used in this test")
+    }
+
+    private fun fakeApiReturning(response: EventDataResponse) = object : RetroFmApi {
+        override suspend fun getNowPlaying(): NowPlayingResponse =
+            error("not used in this test")
+        override suspend fun getRecentPlaylist(stationCode: String): List<NowPlayingResponse> =
+            error("not used in this test")
+        override suspend fun getEventData(eventId: Long): EventDataResponse = response
     }
 
     @Test
@@ -69,6 +92,10 @@ class NowPlayingRepositoryTest {
             }
 
             override suspend fun getRecentPlaylist(stationCode: String): List<NowPlayingResponse> {
+                throw RuntimeException("Network error")
+            }
+
+            override suspend fun getEventData(eventId: Long): EventDataResponse {
                 throw RuntimeException("Network error")
             }
         }
@@ -117,6 +144,32 @@ class NowPlayingRepositoryTest {
         val track = repository.fetchNowPlaying().getOrThrow()
 
         assertEquals(RetroFmConfig.STATION_NAME, track.title)
+    }
+
+    @Test
+    fun `fetchEventData maps a Song event to TrackInfo`() = runTest {
+        val repository = NowPlayingRepository(fakeApi)
+
+        val track = repository.fetchEventData(398586160L).getOrThrow()
+
+        assertEquals(398586160L, track.eventId)
+        assertEquals("Kyrie", track.title)
+        assertEquals("Mr. Mister", track.artist)
+        assertEquals("https://assets.planetradio.co.uk/artist/1-1/320x320/1809.jpg", track.imageUrl)
+        assertEquals("2026-07-22 15:38:54", track.finishTime)
+    }
+
+    @Test
+    fun `fetchEventData falls back to station branding for non-song events`() = runTest {
+        val repository = NowPlayingRepository(
+            fakeApiReturning(EventDataResponse(eventId = 5, eventType = "News"))
+        )
+
+        val track = repository.fetchEventData(5L).getOrThrow()
+
+        assertEquals(RetroFmConfig.STATION_NAME, track.title)
+        assertEquals(RetroFmConfig.STATION_STRAPLINE, track.artist)
+        assertEquals(RetroFmConfig.LOGO_PNG_URL, track.imageUrl)
     }
 
     @Test

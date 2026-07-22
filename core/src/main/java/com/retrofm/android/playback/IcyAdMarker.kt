@@ -21,4 +21,14 @@ object IcyAdMarker {
         if (!AD_FLAG.containsMatchIn(text)) return null
         return DURATION.find(text)?.groupValues?.get(1)?.toLongOrNull() ?: DEFAULT_AD_DURATION_MS
     }
+
+    private val EVENT_URL = Regex("eventdata/(-?\\d+)")
+
+    /**
+     * Event id from an ICY StreamUrl like `…/api9.2/eventdata/398586160`. The stream sends
+     * `eventdata/-1` when nothing is on (news, jingles) — returned as -1, distinct from null
+     * (= not an eventdata URL at all).
+     */
+    fun parseEventId(streamUrl: String?): Long? =
+        streamUrl?.let { EVENT_URL.find(it)?.groupValues?.get(1)?.toLongOrNull() }
 }

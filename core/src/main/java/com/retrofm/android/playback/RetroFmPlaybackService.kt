@@ -55,6 +55,14 @@ class RetroFmPlaybackService : MediaLibraryService() {
     private var adUntilElapsedMs: Long? = null
     private var adUnmuteJob: Job? = null
     private var preAdVolume: Float? = null
+    private val nowPlayingRepository = NowPlayingRepository(NetworkModule.retroFmApi)
+
+    /**
+     * True once ICY track metadata has arrived from the stream. From then on the display is
+     * driven by the stream itself (sample-accurate) and the schedule-based nowplaying polling
+     * — which runs ahead of what is audible by the buffering delay — stays off.
+     */
+    private var icyDriven = false
 
     override fun onCreate() {
         super.onCreate()
@@ -105,18 +113,17 @@ class RetroFmPlaybackService : MediaLibraryService() {
     }
 
     private fun fetchNowPlayingOnce() {
-        val repository = NowPlayingRepository(NetworkModule.retroFmApi)
         serviceScope.launch {
-            repository.fetchNowPlaying().onSuccess { track -> applyTrackMetadata(track) }
+            nowPlayingRepository.fetchNowPlaying().onSuccess { track -> applyTrackMetadata(track) }
         }
     }
 
     private fun startMetadataPolling() {
+        if (icyDriven) return
         if (metadataJob?.isActive == true) return
-        val repository = NowPlayingRepository(NetworkModule.retroFmApi)
         metadataJob = serviceScope.launch {
             while (isActive) {
-                val delayMs = repository.fetchNowPlaying().fold(
+                val delayMs = nowPlayingRepository.fetchNowPlaying().fold(
                     onSuccess = { track ->
                         applyTrackMetadata(track)
                         nextPollDelayMs(track.finishTime)
@@ -247,8 +254,51 @@ class RetroFmPlaybackService : MediaLibraryService() {
                     setAdState(SystemClock.elapsedRealtime() + durationMs)
                 } else {
                     clearAdState()
+                    onIcyTrackMetadata(icy)
                 }
             }
+        }
+    }
+
+    /**
+     * A track boundary announced by the stream itself, delivered exactly when it becomes
+     * audible. The StreamUrl carries an eventdata id — look it up for full track info
+     * (title/artist/artwork); on lookup failure fall back to parsing the StreamTitle.
+     */
+    private fun onIcyTrackMetadata(icy: IcyInfo) {
+        icyDriven = true
+        stopMetadataPolling()
+
+        val eventId = IcyAdMarker.parseEventId(icy.url)
+        if (eventId != null && eventId > 0) {
+            serviceScope.launch {
+                nowPlayingRepository.fetchEventData(eventId).fold(
+                    onSuccess = { applyTrackMetadata(it) },
+                    onFailure = { applyTrackMetadata(trackFromStreamTitle(icy, eventId)) }
+                )
+            }
+        } else {
+            // eventdata/-1 (or no url): nothing is on — news, jingles, between events.
+            applyTrackMetadata(NowPlayingRepository.stationFallback(eventId ?: -1L))
+        }
+    }
+
+    /** Last resort when the eventdata lookup fails: "Title - Artist" from the StreamTitle. */
+    private fun trackFromStreamTitle(icy: IcyInfo, eventId: Long): TrackInfo {
+        val parts = icy.title?.split(" - ", limit = 2)
+        val title = parts?.getOrNull(0)?.trim().orEmpty()
+        val artist = parts?.getOrNull(1)?.trim().orEmpty()
+        return if (title.isBlank()) {
+            NowPlayingRepository.stationFallback(eventId)
+        } else {
+            TrackInfo(
+                eventId = eventId,
+                title = title,
+                artist = artist.ifBlank { RetroFmConfig.STATION_NAME },
+                imageUrl = RetroFmConfig.LOGO_PNG_URL,
+                startTime = null,
+                finishTime = null
+            )
         }
     }
 

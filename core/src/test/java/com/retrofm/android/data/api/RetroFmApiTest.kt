@@ -88,6 +88,37 @@ class RetroFmApiTest {
     }
 
     @Test
+    fun `getEventData requests the eventdata endpoint and parses a real response`() = runTest {
+        // Captured live from the API 2026-07-22 (the id comes from the stream's ICY StreamUrl).
+        server.enqueue(
+            MockResponse().setBody(
+                """
+                {
+                  "eventId": 398586160,
+                  "eventStart": "2026-07-22 15:34:24",
+                  "eventFinish": "2026-07-22 15:38:54",
+                  "eventDuration": 180,
+                  "eventType": "Song",
+                  "eventSongTitle": "Kyrie",
+                  "eventSongArtist": "Mr. Mister",
+                  "eventImageUrl": "https://assets.planetradio.co.uk/artist/1-1/320x320/1809.jpg?ver=1465084128",
+                  "eventImageUrlSmall": "https://assets.planetradio.co.uk/artist/1-1/160x160/1809.jpg?ver=1465084128",
+                  "eventAppleMusicUrl": "https://geo.itunes.apple.com/dk/album/329887836?i=329891190"
+                }
+                """.trimIndent()
+            ).setHeader("Content-Type", "application/json")
+        )
+
+        val response = api.getEventData(eventId = 398586160L)
+
+        val request = server.takeRequest()
+        assertEquals("/api9.2/eventdata/398586160", request.path)
+        assertEquals("Song", response.eventType)
+        assertEquals("Kyrie", response.eventSongTitle)
+        assertEquals("Mr. Mister", response.eventSongArtist)
+    }
+
+    @Test
     fun `getNowPlaying tolerates a non-song event with missing track fields`() = runTest {
         server.enqueue(
             MockResponse().setBody(

@@ -2,6 +2,7 @@ package com.retrofm.android.data.repository
 
 import com.retrofm.android.data.api.RetroFmApi
 import com.retrofm.android.data.config.RetroFmConfig
+import com.retrofm.android.data.model.EventDataResponse
 import com.retrofm.android.data.model.NowPlayingResponse
 import com.retrofm.android.data.model.TrackInfo
 
@@ -9,6 +10,11 @@ class NowPlayingRepository(private val api: RetroFmApi) {
 
     suspend fun fetchNowPlaying(): Result<TrackInfo> = fetch {
         api.getNowPlaying().toTrackInfo()
+    }
+
+    /** Exact lookup of the event the stream itself announced via ICY metadata. */
+    suspend fun fetchEventData(eventId: Long): Result<TrackInfo> = fetch {
+        api.getEventData(eventId).toTrackInfo()
     }
 
     suspend fun fetchRecentPlaylist(): Result<List<TrackInfo>> = fetch {
@@ -19,6 +25,25 @@ class NowPlayingRepository(private val api: RetroFmApi) {
         Result.success(block())
     } catch (e: Exception) {
         Result.failure(e)
+    }
+
+    private fun EventDataResponse.toTrackInfo(): TrackInfo {
+        val isSongEvent =
+            eventType == "Song" && eventSongTitle.isNotBlank() && eventSongArtist.isNotBlank()
+        return if (isSongEvent) {
+            TrackInfo(
+                eventId = eventId,
+                title = eventSongTitle,
+                artist = eventSongArtist,
+                imageUrl = eventImageUrl?.takeIf { it.isNotBlank() }
+                    ?: eventImageUrlSmall?.takeIf { it.isNotBlank() }
+                    ?: RetroFmConfig.LOGO_PNG_URL,
+                startTime = eventStart,
+                finishTime = eventFinish
+            )
+        } else {
+            stationFallback(eventId, eventStart, eventFinish)
+        }
     }
 
     private fun NowPlayingResponse.toTrackInfo(): TrackInfo {
@@ -36,14 +61,23 @@ class NowPlayingRepository(private val api: RetroFmApi) {
                 finishTime = eventFinish
             )
         } else {
-            TrackInfo(
-                eventId = eventId,
-                title = RetroFmConfig.STATION_NAME,
-                artist = RetroFmConfig.STATION_STRAPLINE,
-                imageUrl = RetroFmConfig.LOGO_PNG_URL,
-                startTime = eventStart,
-                finishTime = eventFinish
-            )
+            stationFallback(eventId, eventStart, eventFinish)
         }
+    }
+
+    companion object {
+        /** Station-branding placeholder for moments without a song event (news, jingles, ads). */
+        fun stationFallback(
+            eventId: Long,
+            startTime: String? = null,
+            finishTime: String? = null
+        ): TrackInfo = TrackInfo(
+            eventId = eventId,
+            title = RetroFmConfig.STATION_NAME,
+            artist = RetroFmConfig.STATION_STRAPLINE,
+            imageUrl = RetroFmConfig.LOGO_PNG_URL,
+            startTime = startTime,
+            finishTime = finishTime
+        )
     }
 }

@@ -32,4 +32,27 @@ class IcyAdMarkerTest {
         val raw = "StreamTitle='';StreamUrl='https://listenapi.planetradio.co.uk/api9.2/eventdata/-1';"
         assertNull(IcyAdMarker.parseDurationMs(raw.toByteArray()))
     }
+
+    @Test
+    fun `parses event id from a StreamUrl`() {
+        assertEquals(
+            398586160L,
+            IcyAdMarker.parseEventId("https://listenapi.planetradio.co.uk/api9.2/eventdata/398586160")
+        )
+    }
+
+    @Test
+    fun `no-event StreamUrl parses as -1`() {
+        assertEquals(
+            -1L,
+            IcyAdMarker.parseEventId("https://listenapi.planetradio.co.uk/api9.2/eventdata/-1")
+        )
+    }
+
+    @Test
+    fun `non-eventdata or missing url is null`() {
+        assertNull(IcyAdMarker.parseEventId("https://example.com/other"))
+        assertNull(IcyAdMarker.parseEventId(""))
+        assertNull(IcyAdMarker.parseEventId(null))
+    }
 }
