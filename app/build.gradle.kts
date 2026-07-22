@@ -16,8 +16,8 @@ android {
         // target API 36. compileSdk is already 36; edge-to-edge (enforced on 36) is handled by
         // enableEdgeToEdge(), and the mediaPlayback foreground service is unaffected.
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.0.7"
+        versionCode = 9
+        versionName = "1.0.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

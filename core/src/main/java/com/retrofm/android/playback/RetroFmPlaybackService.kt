@@ -237,6 +237,16 @@ class RetroFmPlaybackService : MediaLibraryService() {
             }
         }
 
+        override fun onDeviceInfoChanged(deviceInfo: DeviceInfo) {
+            if (deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE) {
+                // Ad state tracks the LOCAL stream's ICY markers; the receiver opens its own
+                // session (with its own preroll we can neither detect nor mute). Clearing
+                // also restores the volume, so a mute active at transfer can't leave the
+                // receiver stuck at volume 0.
+                clearAdState()
+            }
+        }
+
         // ICY in-stream metadata: the server announces spliced-in ads (preroll at connect,
         // midrolls in the same format) with an adw_ad marker and their exact duration — see
         // IcyAdMarker. Regular track metadata doubles as the ad-end signal, which also covers

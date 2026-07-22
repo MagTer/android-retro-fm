@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.Network
 import androidx.media3.cast.CastPlayer
+import androidx.media3.cast.RemoteCastPlayer
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -81,7 +82,16 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
         exoPlayer
     } else {
         try {
-            CastPlayer.Builder(context).setLocalPlayer(exoPlayer).build()
+            CastPlayer.Builder(context)
+                .setLocalPlayer(exoPlayer)
+                .setRemotePlayer(
+                    RemoteCastPlayer.Builder(context)
+                        // Marks the stream LIVE for the receiver; the default converter's
+                        // BUFFERED type left the Default Media Receiver loading forever.
+                        .setMediaItemConverter(RetroFmMediaItemConverter())
+                        .build()
+                )
+                .build()
         } catch (e: Exception) {
             // No Play services / no cast meta-data (e.g. :automotive) → local-only.
             exoPlayer
