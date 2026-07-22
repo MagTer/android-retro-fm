@@ -63,6 +63,12 @@ android {
         compose = true
     }
 
+    // Version-stamped artifact names, e.g. retrofm-1.0.3-vc4-release.aab, so it's always
+    // obvious which build is which when uploading to Play.
+    base.archivesName.set(
+        "retrofm-${defaultConfig.versionName}-vc${defaultConfig.versionCode}"
+    )
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
