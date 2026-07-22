@@ -30,13 +30,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.mediarouter.app.MediaRouteButton
+import android.view.ContextThemeWrapper
 import coil3.compose.AsyncImage
+import com.google.android.gms.cast.framework.CastButtonFactory
+import com.google.android.gms.cast.framework.CastContext
 import com.retrofm.android.R
 import com.retrofm.android.core.R as CoreR
 
@@ -44,6 +50,12 @@ import com.retrofm.android.core.R as CoreR
 fun PlayerScreen(viewModel: PlayerViewModel) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
+    // Only show the cast button where CastContext initialized (Play services + cast meta-data);
+    // on devices without Google Play services the button simply doesn't appear.
+    val isCastAvailable = remember {
+        runCatching { CastContext.getSharedInstance(context) }.isSuccess
+    }
 
     LaunchedEffect(uiState.errorMessage) {
         uiState.errorMessage?.let {
@@ -107,6 +119,16 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                uiState.castDeviceName?.let { device ->
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = stringResource(R.string.casting_to, device),
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(32.dp))
 
                 PlayPauseButton(
@@ -115,8 +137,31 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
                     onClick = { viewModel.togglePlayPause() }
                 )
             }
+
+            if (isCastAvailable) {
+                CastButton(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(48.dp)
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun CastButton(modifier: Modifier = Modifier) {
+    AndroidView(
+        modifier = modifier,
+        factory = { context ->
+            // Themed context so the button tints light and stays visible on the dark
+            // background; the Activity-scoped context lets it find its FragmentActivity host.
+            val themed = ContextThemeWrapper(context, R.style.ThemeOverlay_RetroFM_MediaRoute)
+            MediaRouteButton(themed).also {
+                CastButtonFactory.setUpMediaRouteButton(context, it)
+            }
+        }
+    )
 }
 
 @Composable

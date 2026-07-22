@@ -4,11 +4,13 @@ import android.app.Application
 import android.content.ComponentName
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.AndroidViewModel
+import androidx.media3.common.DeviceInfo
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.google.android.gms.cast.framework.CastContext
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.retrofm.android.R
@@ -25,7 +27,9 @@ data class PlayerUiState(
     val trackTitle: String = RetroFmConfig.STATION_NAME,
     val artistName: String = RetroFmConfig.STATION_STRAPLINE,
     val imageUrl: String? = RetroFmConfig.LOGO_PNG_URL,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    /** Friendly name of the active Cast device while casting; null when playing locally. */
+    val castDeviceName: String? = null
 )
 
 class PlayerViewModel(application: Application) : AndroidViewModel(application) {
@@ -110,5 +114,18 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 }
             )
         }
+
+        override fun onDeviceInfoChanged(deviceInfo: DeviceInfo) {
+            val remote = deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE
+            _uiState.value = _uiState.value.copy(
+                castDeviceName = if (remote) currentCastDeviceName() else null
+            )
+        }
     }
+
+    /** Best-effort friendly name of the active Cast session; null if Cast is unavailable. */
+    private fun currentCastDeviceName(): String? = runCatching {
+        CastContext.getSharedInstance(getApplication())
+            .sessionManager.currentCastSession?.castDevice?.friendlyName
+    }.getOrNull()
 }

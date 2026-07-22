@@ -69,6 +69,11 @@ dependencies {
     // :core's media3-cast. Cast is activated by the manifest meta-data in this module only.
     implementation("androidx.mediarouter:mediarouter:1.7.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
+    // CastButtonFactory + CastContext are referenced directly by the phone UI. They live in
+    // play-services-cast-framework, which :core pulls only via `implementation` (not exposed
+    // across the module boundary), so it must be declared here explicitly. Version matches
+    // what media3-cast 1.10.1 depends on.
+    implementation("com.google.android.gms:play-services-cast-framework:22.1.0")
 
     implementation("io.coil-kt.coil3:coil-compose:3.5.0")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.5.0")

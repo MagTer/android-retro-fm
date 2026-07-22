@@ -4,4 +4,6 @@
     <string name="buffering">Laddar…</string>
     <string name="playback_error">Uppspelningen kunde inte startas</string>
     <string name="retry">Försök igen</string>
+    <string name="cast_button">Casta</string>
+    <string name="casting_to">Castar till %1$s</string>
 </resources>
