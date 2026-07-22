@@ -11,7 +11,9 @@ android {
         // mobile/Android Auto APK and this Android Automotive OS APK as separate form factors.
         applicationId = "com.retrofm.android"
         minSdk = 28
-        targetSdk = 35
+        // API 36 to match the phone artifact and Google Play's 2026-08-31 target requirement
+        // (AAOS itself only needs API 34, but a shared listing follows the phone target).
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
     }

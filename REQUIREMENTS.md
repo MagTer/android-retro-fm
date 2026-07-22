@@ -98,7 +98,7 @@ GET https://listenapi.planetradio.co.uk/api9.2/playlist/?StationCode=res
 
 ## Plattformskrav (verifierade juli 2026)
 - **compileSdk:** API 36 (Android 16 Baklava) — senaste tillgängliga plattforms-API att bygga mot (verifierat via SDK-repository).
-- **targetSdk:** API 35 (Android 15) — Google Play kräver att nya telefonappar och uppdateringar targetar Android 15 (API 35) eller högre från och med 31 augusti 2025. För Android Automotive OS-appar räcker API 34, men eftersom denna app även riktar sig till telefoner styrs vi av telefonkravet.
+- **targetSdk:** API 36 (Android 16) — från och med 31 augusti 2026 kräver Google Play att nya telefonappar och uppdateringar targetar API 36 (Android 16) eller högre. compileSdk är redan 36. För Android Automotive OS-appar räcker API 34, men eftersom denna app även riktar sig till telefoner styrs vi av telefonkravet, så även `:automotive` targetar API 36.
 - **minSdk:** API 26 (Android 8.0) — ger bred telefonkompatibilitet och räcker för Android Auto/AAOS-funktionalitet via Media3.
 - **Bilstöd:** Appen implementerar en `MediaBrowserService` (AndroidX Media3) för att exponeras som mediekälla i både Android Auto och Android Automotive OS. Ingen separat `androidx.car.app`-app krävs för en ren ljudspelare.
 
@@ -129,7 +129,17 @@ Nedanstående versioner har kontrollerats mot officiella källor (Android Develo
 | Coil | **3.5.0** | Senaste stabila Coil 3-version för Compose-bildladdning (verifierad via Maven Central). |
 | Android Studio | **Panda 4 (2025.3.4)** eller nyare | AGP 9.2.x kräver Android Studio Panda (information från sammanställd kompatibilitetsdata; verifiera mot din Android Studio-version vid bygge). |
 
-**Obs:** `targetSdk=35` är valt för att matcha Google Plays aktuella krav för telefonappar (juli 2026). För Android Automotive OS-appar räcker API 34, men vår app targetar både telefon och bil. Om Google Play höjer telefonkravet till API 36 måste `targetSdk` uppdateras i enlighet med det.
+**Obs:** `targetSdk=36` är valt för att möta Google Plays krav för telefonappar från och med 31 augusti 2026 (nya appar och uppdateringar måste targeta API 36). För Android Automotive OS-appar räcker API 34, men vår app targetar både telefon och bil.
+
+### Cast- och versionsuppdateringar (Chromecast-arbetet, juli 2026)
+
+| Komponent | Version | Not |
+|-----------|---------|-----|
+| Media3 Cast (`media3-cast`) | **1.10.1** | Unified `CastPlayer.Builder` (lokal + fjärr). Aktiveras endast i `:app` via manifest-meta-data; `:automotive` faller tillbaka till ren ExoPlayer. |
+| androidx.mediarouter | **1.8.1** | Senaste stabila (verifierad via Google Maven); matchar även `media3-cast`:s transitiva krav. |
+| androidx.appcompat | **1.7.1** | Themed context för mediarouter-dialogerna. |
+| play-services-cast-framework | **22.1.0** | `CastButtonFactory`/`CastContext` i `:app`; matchar `media3-cast` 1.10.1:s beroende. |
+| androidx.lifecycle | **2.9.4** | Patch-uppdatering från 2.9.0. |
 
 ---
 

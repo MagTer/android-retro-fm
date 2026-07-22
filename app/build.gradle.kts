@@ -10,7 +10,10 @@ android {
     defaultConfig {
         applicationId = "com.retrofm.android"
         minSdk = 26
-        targetSdk = 35
+        // API 36 (Android 16): from 2026-08-31 Google Play requires new apps and updates to
+        // target API 36. compileSdk is already 36; edge-to-edge (enforced on 36) is handled by
+        // enableEdgeToEdge(), and the mediaPlayback foreground service is unaffected.
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
 
@@ -48,8 +51,8 @@ dependencies {
     implementation(project(":core"))
 
     implementation("androidx.core:core-ktx:1.16.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.0")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.4")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")
     implementation("androidx.activity:activity-compose:1.10.1")
 
     val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
@@ -67,7 +70,7 @@ dependencies {
     // Google Cast: the MediaRouteButton (chooser/controller) plus the themed context its
     // dialogs inflate against. play-services-cast-framework arrives transitively via
     // :core's media3-cast. Cast is activated by the manifest meta-data in this module only.
-    implementation("androidx.mediarouter:mediarouter:1.7.0")
+    implementation("androidx.mediarouter:mediarouter:1.8.1")
     implementation("androidx.appcompat:appcompat:1.7.1")
     // CastButtonFactory + CastContext are referenced directly by the phone UI. They live in
     // play-services-cast-framework, which :core pulls only via `implementation` (not exposed
