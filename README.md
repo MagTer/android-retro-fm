@@ -43,7 +43,7 @@ Projektet kräver JDK 17 och Android SDK (API 36, build-tools 36.0.0).
 
 ```bash
 ./gradlew :app:installDebug
-adb shell am start -n com.retrofm.android/.ui.MainActivity
+adb shell am start -n com.magter.retrofm/com.retrofm.android.ui.MainActivity
 ```
 
 ## Android Auto / Android Automotive OS

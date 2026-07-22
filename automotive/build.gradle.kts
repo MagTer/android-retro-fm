@@ -9,7 +9,7 @@ android {
     defaultConfig {
         // Same applicationId as the phone app: one Play Store listing serves both the
         // mobile/Android Auto APK and this Android Automotive OS APK as separate form factors.
-        applicationId = "com.retrofm.android"
+        applicationId = "com.magter.retrofm"
         minSdk = 28
         // API 36 to match the phone artifact and Google Play's 2026-08-31 target requirement
         // (AAOS itself only needs API 34, but a shared listing follows the phone target).

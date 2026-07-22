@@ -8,7 +8,9 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.retrofm.android"
+        // Personal namespace, decoupled from the code namespace (com.retrofm.android stays).
+        // Permanent once the first AAB is uploaded to Play — must match :automotive.
+        applicationId = "com.magter.retrofm"
         minSdk = 26
         // API 36 (Android 16): from 2026-08-31 Google Play requires new apps and updates to
         // target API 36. compileSdk is already 36; edge-to-edge (enforced on 36) is handled by
