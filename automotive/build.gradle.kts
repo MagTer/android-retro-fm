@@ -14,8 +14,23 @@ android {
         // API 36 to match the phone artifact and Google Play's 2026-08-31 target requirement
         // (AAOS itself only needs API 34, but a shared listing follows the phone target).
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        // Dedicated 1000+ range: version codes must be unique across every artifact in the
+        // listing, so the phone app counts 1, 2, 3, … and automotive 1001, 1002, …
+        versionCode = 1001
+        versionName = "1.0.7"
+    }
+
+    signingConfigs {
+        // Same upload key and Gradle properties as :app — one listing, one signing identity.
+        create("release") {
+            val storeFilePath = project.findProperty("RETROFM_UPLOAD_STORE_FILE") as String?
+            if (storeFilePath != null) {
+                storeFile = file(storeFilePath)
+                storePassword = project.findProperty("RETROFM_UPLOAD_STORE_PASSWORD") as String?
+                keyAlias = project.findProperty("RETROFM_UPLOAD_KEY_ALIAS") as String?
+                keyPassword = project.findProperty("RETROFM_UPLOAD_KEY_PASSWORD") as String?
+            }
+        }
     }
 
     buildTypes {
@@ -26,6 +41,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (project.hasProperty("RETROFM_UPLOAD_STORE_FILE")) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -33,6 +51,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    base.archivesName.set(
+        "retrofm-automotive-${defaultConfig.versionName}-vc${defaultConfig.versionCode}"
+    )
 }
 
 dependencies {

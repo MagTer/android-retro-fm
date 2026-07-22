@@ -33,6 +33,13 @@ object RetroFmConfig {
     const val MUTE_ADS = true
 
     /**
+     * Extra mute beyond the announced ad duration. Field-tested 2026-07-22: the last ~second
+     * of the ad was audible after unmute at the exact announced deadline. Better to miss a
+     * second of the song than hear the tail of an ad.
+     */
+    const val AD_MUTE_TAIL_MS = 2_000L
+
+    /**
      * Compensation for the station's metadata lead. Icecast splices ICY metadata into the
      * byte stream at the wall-clock moment the studio switches tracks, but the matching audio
      * passes the same stream position only after the studio→encoder→ingest pipeline — so in

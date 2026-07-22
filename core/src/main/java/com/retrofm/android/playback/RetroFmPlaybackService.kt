@@ -247,7 +247,11 @@ class RetroFmPlaybackService : MediaLibraryService() {
                 val icy = metadata.get(i) as? IcyInfo ?: continue
                 val durationMs = IcyAdMarker.parseDurationMs(icy.rawMetadata)
                 if (durationMs != null) {
-                    setAdState(SystemClock.elapsedRealtime() + durationMs)
+                    // The tail extends both the mute and the "Reklam" label so they lift
+                    // together (see RetroFmConfig.AD_MUTE_TAIL_MS).
+                    setAdState(
+                        SystemClock.elapsedRealtime() + durationMs + RetroFmConfig.AD_MUTE_TAIL_MS
+                    )
                 } else {
                     clearAdState()
                     onIcyTrackMetadata(icy)
