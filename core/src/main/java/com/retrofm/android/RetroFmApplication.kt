@@ -9,6 +9,8 @@ import androidx.lifecycle.lifecycleScope
 import com.retrofm.android.core.BuildConfig
 import com.retrofm.android.data.config.RetroFmConfig
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import se.falle.logsink.LogsinkClient
 import se.falle.logsink.LogsinkTree
 import timber.log.Timber
@@ -36,6 +38,18 @@ class RetroFmApplication : Application() {
                 device = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
             )
             Timber.plant(LogsinkTree(client))
+            // Ship crashes before dying: field evidence (Volvo 2026-07-23) showed silent
+            // process-restart loops — the crash itself never reached the sink because the
+            // buffer dies with the process. Log at ERROR, force a bounded flush, then hand
+            // over to the platform handler so normal crash semantics are preserved.
+            val platformHandler = Thread.getDefaultUncaughtExceptionHandler()
+            Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+                runCatching {
+                    Timber.tag("Crash").e(throwable, "uncaught on thread %s", thread.name)
+                    runBlocking { withTimeout(2_000L) { client.flush() } }
+                }
+                platformHandler?.uncaughtException(thread, throwable)
+            }
             // Flush buffered lines whenever the app leaves the foreground.
             ProcessLifecycleOwner.get().lifecycle.addObserver(
                 LifecycleEventObserver { _, event ->
