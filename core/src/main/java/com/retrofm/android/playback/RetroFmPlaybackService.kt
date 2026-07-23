@@ -157,7 +157,10 @@ class RetroFmPlaybackService : MediaLibraryService() {
     }
 
     private fun applyTrackMetadata(track: TrackInfo) {
-        if (track.eventId == lastAppliedEventId) return
+        if (track.eventId == lastAppliedEventId) {
+            Timber.tag("NowPlaying").d("apply skipped (dedup) eventId=%d", track.eventId)
+            return
+        }
 
         // CAST-PLAN §2.4 (WP2): while casting, replaceMediaItem can translate to a queue
         // reload on the receiver, producing an audible gap on every track change. Skip the
@@ -166,9 +169,11 @@ class RetroFmPlaybackService : MediaLibraryService() {
         // track is applied as soon as playback returns to the local route. Revisit once this
         // can be verified on real cast hardware (Phase 4, step 9).
         if (playerManager.player.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE) {
+            Timber.tag("NowPlaying").d("apply skipped (remote route) eventId=%d", track.eventId)
             return
         }
         lastAppliedEventId = track.eventId
+        Timber.tag("NowPlaying").d("apply eventId=%d '%s - %s'", track.eventId, track.title, track.artist)
 
         val item = MediaItemTree.getStationItem()
             .buildUpon()
@@ -196,6 +201,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
      * device volume) until the announced duration elapses or regular track metadata arrives.
      */
     private fun setAdState(untilElapsedMs: Long) {
+        Timber.tag("NowPlaying").d("ad break starts, until=+%d ms", untilElapsedMs - SystemClock.elapsedRealtime())
         adUntilElapsedMs = untilElapsedMs
         mediaLibrarySession.setSessionExtras(
             Bundle().apply { putLong(EXTRA_AD_UNTIL_ELAPSED_MS, untilElapsedMs) }
@@ -233,6 +239,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
 
     private fun clearAdState() {
         if (adUntilElapsedMs == null) return
+        Timber.tag("NowPlaying").d("ad break cleared")
         adUntilElapsedMs = null
         adUnmuteJob?.cancel()
         adUnmuteJob = null
@@ -324,10 +331,14 @@ class RetroFmPlaybackService : MediaLibraryService() {
         stopMetadataPolling()
 
         val eventId = IcyAdMarker.parseEventId(icy.url)
+        Timber.tag("NowPlaying").d("icy boundary: eventId=%s title='%s'", eventId, icy.title)
         serviceScope.launch {
             val track = if (eventId != null && eventId > 0) {
                 nowPlayingRepository.fetchEventData(eventId)
-                    .getOrElse { trackFromStreamTitle(icy, eventId) }
+                    .getOrElse { e ->
+                        Timber.tag("NowPlaying").w("eventdata lookup failed for %d: %s", eventId, e.toString())
+                        trackFromStreamTitle(icy, eventId)
+                    }
             } else {
                 // eventdata/-1 (or no url): nothing is on — news, jingles, between events.
                 NowPlayingRepository.stationFallback(eventId ?: -1L)
