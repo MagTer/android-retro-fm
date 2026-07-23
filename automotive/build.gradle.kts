@@ -16,8 +16,8 @@ android {
         targetSdk = 36
         // Dedicated 1000+ range: version codes must be unique across every artifact in the
         // listing, so the phone app counts 1, 2, 3, … and automotive 1001, 1002, …
-        versionCode = 1002
-        versionName = "1.0.12"
+        versionCode = 1003
+        versionName = "1.0.13"
     }
 
     signingConfigs {

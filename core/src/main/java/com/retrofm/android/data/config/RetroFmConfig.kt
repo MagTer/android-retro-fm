@@ -20,6 +20,9 @@ object RetroFmConfig {
     const val LOGO_PNG_URL =
         "https://media.bauerradio.com/image/upload/c_crop,g_custom/v1592840994/brand_manager/stations/dwxxo0kehcboelrutfnm.png"
 
+    /** Remote log sink ingest (ADR-011, home-server repo). Key comes via BuildConfig. */
+    const val LOGSINK_INGEST_URL = "https://applogs.falle.se/ingest"
+
     const val METADATA_POLL_INTERVAL_MS = 30_000L
     const val METADATA_POLL_MIN_INTERVAL_MS = 2_000L
 

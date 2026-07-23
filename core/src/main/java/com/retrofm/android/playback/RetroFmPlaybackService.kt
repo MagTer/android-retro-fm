@@ -32,6 +32,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -238,8 +239,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
         }
 
         override fun onDeviceInfoChanged(deviceInfo: DeviceInfo) {
-            android.util.Log.i(
-                "RetroFmCast",
+            Timber.tag("RetroFmCast").i(
                 "route=${if (deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE) "REMOTE" else "LOCAL"} " +
                     "state=${playerManager.player.playbackState} " +
                     "playWhenReady=${playerManager.player.playWhenReady} " +
@@ -293,7 +293,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
                 player.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE &&
                     player.playWhenReady && !player.isPlaying
             if (stillStuckOnRemote) {
-                android.util.Log.i("RetroFmCast", "receiver stuck after transfer — seeking live edge")
+                Timber.tag("RetroFmCast").i("receiver stuck after transfer — seeking live edge")
                 player.seekToDefaultPosition()
                 player.play()
             }

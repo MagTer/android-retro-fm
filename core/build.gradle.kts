@@ -10,7 +10,20 @@ android {
     defaultConfig {
         minSdk = 26
 
+        // Log-sink append key (ADR-011 in the home-server repo). A rate-limit/revocation
+        // handle rather than a secret, but still never in source: comes from
+        // ~/.gradle/gradle.properties (RETROFM_LOGSINK_KEY) or -P. Blank = remote logging off.
+        buildConfigField(
+            "String",
+            "LOGSINK_KEY",
+            "\"${project.findProperty("RETROFM_LOGSINK_KEY") ?: ""}\""
+        )
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     compileOptions {
@@ -35,6 +48,12 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+
+    // Remote log pipeline (vendored se.falle.logsink + RetroFmApplication). Timber is `api`:
+    // call sites in :app log through Timber too.
+    api("com.jakewharton.timber:timber:5.0.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.4")
+    implementation("androidx.lifecycle:lifecycle-process:2.9.4")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")

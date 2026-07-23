@@ -22,6 +22,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import timber.log.Timber
 
 class PlayerManager(context: Context, private val scope: CoroutineScope) {
 
@@ -162,6 +163,9 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
 
     private fun scheduleReconnect() {
         if (reconnectAttempts >= RetroFmConfig.MAX_RECONNECT_ATTEMPTS) {
+            Timber.tag(TAG).e(
+                "giving up after %d reconnect attempts", RetroFmConfig.MAX_RECONNECT_ATTEMPTS
+            )
             return
         }
         val delayMs = RetroFmConfig.RECONNECT_BACKOFF_MS.getOrElse(reconnectAttempts) {
@@ -187,6 +191,10 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            Timber.tag(TAG).w(
+                "player error %s (reconnect attempt %d, playWhenReady=%b)",
+                error.errorCodeName, reconnectAttempts, player.playWhenReady
+            )
             wasPlayingBeforeError = player.playWhenReady
             if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
                 player.seekToDefaultPosition()
@@ -195,5 +203,9 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
             }
             scheduleReconnect()
         }
+    }
+
+    private companion object {
+        const val TAG = "Playback"
     }
 }

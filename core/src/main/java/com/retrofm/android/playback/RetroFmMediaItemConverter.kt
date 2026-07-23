@@ -1,6 +1,6 @@
 package com.retrofm.android.playback
 
-import android.util.Log
+import timber.log.Timber
 import androidx.media3.cast.DefaultMediaItemConverter
 import androidx.media3.cast.MediaItemConverter
 import androidx.media3.common.MediaItem
@@ -41,7 +41,7 @@ class RetroFmMediaItemConverter : MediaItemConverter {
             .setAutoplay(defaultItem.autoplay)
             .apply { defaultItem.customData?.let { setCustomData(it) } }
             .build()
-            .also { Log.i(TAG, "LOAD payload: ${it.toJson()}") }
+            .also { Timber.tag(TAG).i("LOAD payload: %s", it.toJson()) }
     }
 
     override fun toMediaItem(mediaQueueItem: MediaQueueItem): MediaItem =
