@@ -1,6 +1,7 @@
 package com.retrofm.android
 
 import android.app.Application
+import android.os.Build
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -30,7 +31,9 @@ class RetroFmApplication : Application() {
         if (key.isNotBlank()) {
             val client = LogsinkClient(
                 ingestUrl = RetroFmConfig.LOGSINK_INGEST_URL,
-                apiKey = key
+                apiKey = key,
+                // Tells the phone's lines apart from the car's in the sink.
+                device = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
             )
             Timber.plant(LogsinkTree(client))
             // Flush buffered lines whenever the app leaves the foreground.

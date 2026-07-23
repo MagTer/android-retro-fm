@@ -46,6 +46,17 @@ object RetroFmConfig {
     const val AD_MUTE_TAIL_MS = 2_000L
 
     /**
+     * Now-playing branding during a muted ad break. Goes into the media metadata itself so
+     * every surface (car UI, notification, phone screen) stops claiming an artist is playing
+     * while the audio is muted — field-tested confusion: raise the volume on a "song", get
+     * blasted when the mute lifts.
+     */
+    const val AD_DISPLAY_TITLE = "Reklam"
+    const val AD_DISPLAY_SUBTITLE = "Sändningen fortsätter strax"
+    /** Sentinel eventId for the ad-branding metadata (never collides with API event ids). */
+    const val AD_EVENT_ID = -2L
+
+    /**
      * Delay before auto-seeking a freshly connected Cast receiver to the live edge. The
      * transfer hands the receiver the local playback position, which an unseekable Icecast
      * stream can't honor — the receiver stalls until something seeks it to the live edge

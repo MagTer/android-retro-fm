@@ -200,6 +200,20 @@ class RetroFmPlaybackService : MediaLibraryService() {
         mediaLibrarySession.setSessionExtras(
             Bundle().apply { putLong(EXTRA_AD_UNTIL_ELAPSED_MS, untilElapsedMs) }
         )
+        // Ad branding into the media metadata itself: the session extras only reach our own
+        // phone UI, but the car's now-playing and the notification read the metadata — they
+        // kept showing the previous track over muted audio (volume-shock confusion). The next
+        // ICY track event restores real metadata after the break.
+        applyTrackMetadata(
+            TrackInfo(
+                eventId = RetroFmConfig.AD_EVENT_ID,
+                title = RetroFmConfig.AD_DISPLAY_TITLE,
+                artist = RetroFmConfig.AD_DISPLAY_SUBTITLE,
+                imageUrl = RetroFmConfig.LOGO_PNG_URL,
+                startTime = null,
+                finishTime = null
+            )
+        )
         if (RetroFmConfig.MUTE_ADS) {
             // Back-to-back ads re-announce themselves: only capture the volume on the first,
             // so a mid-break marker can't overwrite the saved level with our own 0.
