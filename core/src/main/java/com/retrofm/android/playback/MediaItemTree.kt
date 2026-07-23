@@ -1,10 +1,12 @@
 package com.retrofm.android.playback
 
 import android.net.Uri
+import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import com.retrofm.android.data.config.RetroFmConfig
+import com.retrofm.android.data.model.TrackInfo
 
 /**
  * Browse tree shaped for the Automotive OS media UI, which renders the ROOT's children as
@@ -44,6 +46,8 @@ object MediaItemTree {
                 .setIsPlayable(false)
                 .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_RADIO_STATIONS)
                 .setArtworkUri(Uri.parse(RetroFmConfig.LOGO_PNG_URL))
+                // Children of this tab render as grid tiles (big artwork cards).
+                .setExtras(gridHintExtras())
                 .build()
         )
         .build()
@@ -73,10 +77,38 @@ object MediaItemTree {
     fun getStationsTabItem(): MediaItem = stationsTabItem
     fun getStationItem(): MediaItem = stationMediaItem
 
-    /** Children per browsable node; empty for unknown/leaf ids. */
-    fun getChildren(parentId: String): List<MediaItem> = when (parentId) {
-        ROOT_ID -> listOf(stationsTabItem)
-        STATIONS_TAB_ID -> listOf(stationMediaItem)
-        else -> emptyList()
+    /**
+     * Children per browsable node; empty for unknown/leaf ids. The station's BROWSE
+     * representation is live: it carries the currently playing track's title/artist/artwork
+     * (falling back to station branding) so the car's big browse pane works as a now-playing
+     * card instead of a static sign. The service calls notifyChildrenChanged on track changes.
+     */
+    fun getChildren(parentId: String, nowPlaying: TrackInfo? = null): List<MediaItem> =
+        when (parentId) {
+            ROOT_ID -> listOf(stationsTabItem)
+            STATIONS_TAB_ID -> listOf(stationBrowseItem(nowPlaying))
+            else -> emptyList()
+        }
+
+    private fun stationBrowseItem(nowPlaying: TrackInfo?): MediaItem {
+        if (nowPlaying == null) return stationMediaItem
+        return stationMediaItem.buildUpon()
+            .setMediaMetadata(
+                stationMediaItem.mediaMetadata.buildUpon()
+                    .setTitle(nowPlaying.title)
+                    .setSubtitle(nowPlaying.artist)
+                    .setArtist(nowPlaying.artist)
+                    .setArtworkUri(nowPlaying.imageUrl?.let { Uri.parse(it) })
+                    .build()
+            )
+            .build()
+    }
+
+    /**
+     * Legacy content-style hints (documented Android Auto/AAOS keys, bridged by Media3):
+     * render playable children as GRID tiles — a big artwork card instead of a list row.
+     */
+    private fun gridHintExtras(): Bundle = Bundle().apply {
+        putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT", 2 /* grid */)
     }
 }

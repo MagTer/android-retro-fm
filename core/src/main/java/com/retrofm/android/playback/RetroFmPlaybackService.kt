@@ -11,6 +11,8 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Metadata
 import androidx.media3.common.Player
 import androidx.media3.extractor.metadata.icy.IcyInfo
+import androidx.media3.datasource.DataSourceBitmapLoader
+import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
@@ -53,6 +55,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var metadataJob: Job? = null
     private var lastAppliedEventId: Long? = null
+    private var currentTrack: TrackInfo? = null
     private var adUntilElapsedMs: Long? = null
     private var adUnmuteJob: Job? = null
     private var preAdVolume: Float? = null
@@ -77,6 +80,13 @@ class RetroFmPlaybackService : MediaLibraryService() {
             playerManager.player,
             RetroFmMediaLibraryCallback()
         )
+            // Same loader Media3 uses by default, wrapped with logging: makes the car's
+            // artwork path (placeholder mystery) observable through the log sink.
+            .setBitmapLoader(
+                ArtworkLoggingBitmapLoader(
+                    CacheBitmapLoader(DataSourceBitmapLoader(this))
+                )
+            )
         // Resolved by package at runtime rather than a compile-time Activity reference, since
         // this class is shared between the phone module (has a launcher Activity) and the
         // Android Automotive OS module (must not declare one).
@@ -192,6 +202,11 @@ class RetroFmPlaybackService : MediaLibraryService() {
             .build()
 
         playerManager.updateMediaItem(item)
+
+        // Live browse tile: the station's browse representation mirrors the current track,
+        // so tell connected browsers (the car's media host) to re-fetch it.
+        currentTrack = track
+        mediaLibrarySession.notifyChildrenChanged(MediaItemTree.STATIONS_TAB_ID, 1, null)
     }
 
     /**
@@ -395,7 +410,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: MediaLibraryService.LibraryParams?
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
-            val children = MediaItemTree.getChildren(parentId)
+            val children = MediaItemTree.getChildren(parentId, currentTrack)
             Timber.tag("MediaLibrary").d(
                 "onGetChildren(%s) from %s -> %d children",
                 parentId, browser.packageName, children.size
