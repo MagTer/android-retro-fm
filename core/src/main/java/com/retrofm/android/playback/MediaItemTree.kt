@@ -6,8 +6,20 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import com.retrofm.android.data.config.RetroFmConfig
 
+/**
+ * Browse tree shaped for the Automotive OS media UI, which renders the ROOT's children as
+ * TABS and expects each tab to be a browsable node whose children are the playable items.
+ * The old two-level tree (root -> playable station directly) made the car render one tab
+ * with nothing browsable inside it — shown as "Inget innehåll finns för bläddring" over the
+ * whole browse pane. Android Auto tolerated it; the built-in car UI does not.
+ *
+ *   root (browsable)
+ *   └── stations tab (browsable, MEDIA_TYPE_FOLDER_RADIO_STATIONS)
+ *       └── Retro FM (playable live stream)
+ */
 object MediaItemTree {
     const val ROOT_ID = "root"
+    const val STATIONS_TAB_ID = "stations"
     const val STATION_ID = "retro_fm_station"
 
     private val rootMediaItem: MediaItem = MediaItem.Builder()
@@ -18,7 +30,20 @@ object MediaItemTree {
                 .setSubtitle(RetroFmConfig.STATION_STRAPLINE)
                 .setIsBrowsable(true)
                 .setIsPlayable(false)
-                .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
+                .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_RADIO_STATIONS)
+                .build()
+        )
+        .build()
+
+    private val stationsTabItem: MediaItem = MediaItem.Builder()
+        .setMediaId(STATIONS_TAB_ID)
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(RetroFmConfig.STATION_NAME)
+                .setIsBrowsable(true)
+                .setIsPlayable(false)
+                .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_RADIO_STATIONS)
+                .setArtworkUri(Uri.parse(RetroFmConfig.LOGO_PNG_URL))
                 .build()
         )
         .build()
@@ -45,5 +70,13 @@ object MediaItemTree {
         .build()
 
     fun getRootItem(): MediaItem = rootMediaItem
+    fun getStationsTabItem(): MediaItem = stationsTabItem
     fun getStationItem(): MediaItem = stationMediaItem
+
+    /** Children per browsable node; empty for unknown/leaf ids. */
+    fun getChildren(parentId: String): List<MediaItem> = when (parentId) {
+        ROOT_ID -> listOf(stationsTabItem)
+        STATIONS_TAB_ID -> listOf(stationMediaItem)
+        else -> emptyList()
+    }
 }

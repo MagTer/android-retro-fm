@@ -351,6 +351,12 @@ class RetroFmPlaybackService : MediaLibraryService() {
             browser: MediaSession.ControllerInfo,
             params: MediaLibraryService.LibraryParams?
         ): ListenableFuture<LibraryResult<MediaItem>> {
+            // DEBUG-level so a remote investigation (sink level DEBUG) captures exactly what
+            // the car's media host asks for — undebuggable via adb in a real car.
+            Timber.tag("MediaLibrary").d(
+                "onGetLibraryRoot from %s (recent=%b, suggested=%b)",
+                browser.packageName, params?.isRecent == true, params?.isSuggested == true
+            )
             return Futures.immediateFuture(
                 LibraryResult.ofItem(MediaItemTree.getRootItem(), params)
             )
@@ -364,13 +370,31 @@ class RetroFmPlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: MediaLibraryService.LibraryParams?
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
-            val children = if (parentId == MediaItemTree.ROOT_ID) {
-                ImmutableList.of(MediaItemTree.getStationItem())
-            } else {
-                ImmutableList.of()
+            val children = MediaItemTree.getChildren(parentId)
+            Timber.tag("MediaLibrary").d(
+                "onGetChildren(%s) from %s -> %d children",
+                parentId, browser.packageName, children.size
+            )
+            return Futures.immediateFuture(
+                LibraryResult.ofItemList(ImmutableList.copyOf(children), params)
+            )
+        }
+
+        override fun onGetItem(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            mediaId: String
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            Timber.tag("MediaLibrary").d("onGetItem(%s) from %s", mediaId, browser.packageName)
+            val item = when (mediaId) {
+                MediaItemTree.ROOT_ID -> MediaItemTree.getRootItem()
+                MediaItemTree.STATIONS_TAB_ID -> MediaItemTree.getStationsTabItem()
+                MediaItemTree.STATION_ID -> MediaItemTree.getStationItem()
+                else -> null
             }
             return Futures.immediateFuture(
-                LibraryResult.ofItemList(children, params)
+                if (item != null) LibraryResult.ofItem(item, null)
+                else LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
             )
         }
 
