@@ -37,9 +37,9 @@ jobs:
       # dedicated 1100+ range — unique across the shared Play listing, no manual bump needed.
       - name: Build signed release bundles
         env:
-          STORE_PW: ${{ secrets.KEYSTORE_STORE_PASSWORD }}
+          STORE_PW: ${{ secrets.RETROFM_UPLOAD_STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEYSTORE_KEY_ALIAS }}
-          KEY_PW: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
+          KEY_PW: ${{ secrets.RETROFM_UPLOAD_KEY_PASSWORD }}
           LOGSINK_KEY: ${{ secrets.LOGSINK_KEY }}
         run: |
           chmod +x ./gradlew
