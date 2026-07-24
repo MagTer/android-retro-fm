@@ -59,6 +59,9 @@ class RetroFmPlaybackService : MediaLibraryService() {
     private var adUntilElapsedMs: Long? = null
     private var adUnmuteJob: Job? = null
     private var preAdVolume: Float? = null
+    // A real track title that arrived (via polling) while an ad break was active — held back
+    // so it can't replace the "Reklam" label over muted audio, applied when the break lifts.
+    private var pendingAdTrack: TrackInfo? = null
     private val nowPlayingRepository = NowPlayingRepository(NetworkModule.retroFmApi)
 
     /**
@@ -167,6 +170,16 @@ class RetroFmPlaybackService : MediaLibraryService() {
     }
 
     private fun applyTrackMetadata(track: TrackInfo) {
+        // Hold real track metadata for the duration of an ad break. Audio is muted and the
+        // surface shows "Reklam", so a title arriving from the (ad-unaware) polling loop must
+        // not replace the ad label mid-break — field logs showed songs flashing up over muted
+        // ad audio. The ad-end path clears ad state before applying its track, so it is
+        // unaffected; the held track is applied by clearAdState when the break lifts.
+        if (adUntilElapsedMs != null && track.eventId != RetroFmConfig.AD_EVENT_ID) {
+            pendingAdTrack = track
+            Timber.tag("NowPlaying").d("apply held during ad break eventId=%d", track.eventId)
+            return
+        }
         if (track.eventId == lastAppliedEventId) {
             Timber.tag("NowPlaying").d("apply skipped (dedup) eventId=%d", track.eventId)
             return
@@ -261,6 +274,13 @@ class RetroFmPlaybackService : MediaLibraryService() {
         preAdVolume?.let { playerManager.player.volume = it }
         preAdVolume = null
         mediaLibrarySession.setSessionExtras(Bundle())
+        // Restore the real track the moment the break lifts. adUntilElapsedMs is already null,
+        // so this apply is no longer suppressed; an ICY ad-end frame (if that is what cleared
+        // the break) applies its own track right after, deduped if identical.
+        pendingAdTrack?.let { pending ->
+            pendingAdTrack = null
+            applyTrackMetadata(pending)
+        }
     }
 
     private inner class PlaybackStateListener : Player.Listener {
@@ -355,7 +375,16 @@ class RetroFmPlaybackService : MediaLibraryService() {
                         trackFromStreamTitle(icy, eventId)
                     }
             } else {
-                // eventdata/-1 (or no url): nothing is on — news, jingles, between events.
+                // eventdata/-1 (or no url): nothing identified — jingles, between-song gaps,
+                // news. The stream emits one of these ~6-10 s before each song's real
+                // boundary; reverting to the station logo each time made the car surface flash
+                // the Retro FM logo between every pair of songs. If a real track is already on
+                // screen (and no ad is running), keep it until the next song's boundary instead.
+                val current = currentTrack
+                if (current != null && current.eventId > 0 && adUntilElapsedMs == null) {
+                    Timber.tag("NowPlaying").d("empty icy frame — keeping current eventId=%d", current.eventId)
+                    return@launch
+                }
                 NowPlayingRepository.stationFallback(eventId ?: -1L)
             }
             // Fetch first, then hold: compensates the station-side metadata lead (see
