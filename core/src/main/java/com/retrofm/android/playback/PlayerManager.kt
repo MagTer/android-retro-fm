@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
 import androidx.media3.cast.CastPlayer
 import androidx.media3.cast.RemoteCastPlayer
 import androidx.media3.common.AudioAttributes
@@ -106,11 +107,16 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
     private val connectivityManager =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
-    // Also fires for the current network right at registration — harmless: with no player
-    // error and no pending reconnect, retryNowIfRecovering() is a no-op.
+    // Fire on VALIDATED internet, not mere availability. The car's modem reports the network
+    // "available" seconds before it can actually reach the stream, so onAvailable retried too
+    // early (and then the reconnect loop backed off past the point where real internet arrived).
+    // NET_CAPABILITY_VALIDATED is the "the internet actually works now" signal. Also fires for
+    // the current network at registration — harmless: with no player error it's a no-op.
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) {
-            scope.launch { retryNowIfRecovering() }
+        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+            if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                scope.launch { retryNowIfRecovering() }
+            }
         }
     }
 
@@ -162,12 +168,14 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
     }
 
     private fun scheduleReconnect() {
-        if (reconnectAttempts >= RetroFmConfig.MAX_RECONNECT_ATTEMPTS) {
-            Timber.tag(TAG).e(
-                "giving up after %d reconnect attempts", RetroFmConfig.MAX_RECONNECT_ATTEMPTS
-            )
-            return
-        }
+        // Keep retrying for as long as playback is wanted rather than giving up after a fixed
+        // count. The car frequently powers on before its modem has validated internet, and the
+        // old hard cap (~1 min) left the stream dead — buffer drains, then silence until a
+        // manual restart. Backoff escalates to RECONNECT_BACKOFF_MS.last() and holds there; the
+        // validated-internet callback (onCapabilitiesChanged) short-circuits the wait the moment
+        // the connection is real. When the user has paused, wasPlayingBeforeError is false and
+        // we don't loop.
+        if (!wasPlayingBeforeError) return
         val delayMs = RetroFmConfig.RECONNECT_BACKOFF_MS.getOrElse(reconnectAttempts) {
             RetroFmConfig.RECONNECT_BACKOFF_MS.last()
         }
@@ -175,11 +183,10 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
             delay(delayMs)
+            // prepare() reopens the live stream at the live edge, so recovery is never stale.
             // On the cast route this re-loads the stream on the receiver — acceptable.
             player.prepare()
-            if (wasPlayingBeforeError) {
-                player.play()
-            }
+            player.play()
         }
     }
 

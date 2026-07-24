@@ -26,9 +26,12 @@ object RetroFmConfig {
     const val METADATA_POLL_INTERVAL_MS = 30_000L
     const val METADATA_POLL_MIN_INTERVAL_MS = 2_000L
 
-    /** Exponential backoff schedule for stream reconnect attempts after a player error. */
+    /**
+     * Backoff schedule for stream reconnect attempts after a player error. Escalates and then
+     * holds at the last value — reconnect is retried indefinitely while playback is wanted (no
+     * hard give-up), so the stream self-heals whenever validated internet returns.
+     */
     val RECONNECT_BACKOFF_MS = listOf(1_000L, 2_000L, 5_000L, 10_000L, 30_000L)
-    const val MAX_RECONNECT_ATTEMPTS = 5
 
     /**
      * Mute the player while a server-spliced ad (see IcyAdMarker) is playing. The UI keeps

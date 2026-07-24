@@ -20,7 +20,7 @@ android {
         // unique without a manual bump; local builds fall back to this literal. Kept < 1000 so
         // it never collides with the automotive 1000+ range in the shared Play listing.
         versionCode = (project.findProperty("RETROFM_PHONE_VERSION_CODE") as String?)?.toIntOrNull() ?: 21
-        versionName = "1.0.22"
+        versionName = "1.0.23"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -19,7 +19,7 @@ android {
         // CI passes -PRETROFM_AUTO_VERSION_CODE=$((1100 + run_number)); local builds fall back
         // to this literal. Stays in the dedicated 1000+ range, unique from the phone artifact.
         versionCode = (project.findProperty("RETROFM_AUTO_VERSION_CODE") as String?)?.toIntOrNull() ?: 1010
-        versionName = "1.0.22"
+        versionName = "1.0.23"
     }
 
     signingConfigs {
