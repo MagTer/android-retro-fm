@@ -16,7 +16,9 @@ android {
         targetSdk = 36
         // Dedicated 1000+ range: version codes must be unique across every artifact in the
         // listing, so the phone app counts 1, 2, 3, … and automotive 1001, 1002, …
-        versionCode = 1010
+        // CI passes -PRETROFM_AUTO_VERSION_CODE=$((1100 + run_number)); local builds fall back
+        // to this literal. Stays in the dedicated 1000+ range, unique from the phone artifact.
+        versionCode = (project.findProperty("RETROFM_AUTO_VERSION_CODE") as String?)?.toIntOrNull() ?: 1010
         versionName = "1.0.20"
     }
 

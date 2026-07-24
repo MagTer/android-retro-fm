@@ -16,7 +16,10 @@ android {
         // target API 36. compileSdk is already 36; edge-to-edge (enforced on 36) is handled by
         // enableEdgeToEdge(), and the mediaPlayback foreground service is unaffected.
         targetSdk = 36
-        versionCode = 21
+        // CI passes -PRETROFM_PHONE_VERSION_CODE=$((100 + run_number)) so every release run is
+        // unique without a manual bump; local builds fall back to this literal. Kept < 1000 so
+        // it never collides with the automotive 1000+ range in the shared Play listing.
+        versionCode = (project.findProperty("RETROFM_PHONE_VERSION_CODE") as String?)?.toIntOrNull() ?: 21
         versionName = "1.0.20"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
