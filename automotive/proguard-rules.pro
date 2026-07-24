@@ -13,3 +13,11 @@
 -keepclasseswithmembers class com.retrofm.android.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
+
+# The car artifact excludes the GMS/Cast dependency (see build.gradle.kts): media3-cast's
+# CastPlayer classes stay on the classpath but reference GMS types that are no longer packaged.
+# The cast code path is never reached on FEATURE_AUTOMOTIVE, so let R8 tolerate the dangling
+# references instead of failing the build.
+-dontwarn com.google.android.gms.**
+-dontwarn com.google.android.datatransport.**
+-dontwarn androidx.media3.cast.**

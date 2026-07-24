@@ -20,20 +20,7 @@
         <meta-data
             android:name="com.android.automotive"
             android:resource="@xml/automotive_app_desc" />
-
-        <!-- Cast is gated off in the car (FEATURE_AUTOMOTIVE never builds a CastPlayer), but
-             media3-cast pulls play-services-cast-framework transitively through :core, which
-             merges these entries in. The com.google.android.gms.version meta-data makes head
-             units without a current Google Play services show a "needs Google Play services"
-             error on launch — strip it and the dead cast components from the car artifact. -->
-        <meta-data
-            android:name="com.google.android.gms.version"
-            tools:node="remove" />
-        <receiver
-            android:name="com.google.android.gms.cast.framework.media.MediaIntentReceiver"
-            tools:node="remove" />
-        <service
-            android:name="com.google.android.gms.cast.framework.ReconnectionService"
-            tools:node="remove" />
+        <!-- Cast/Google Play services are excluded from this artifact entirely; see the
+             dependency exclude in build.gradle.kts. -->
     </application>
 </manifest>

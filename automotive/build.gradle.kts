@@ -16,8 +16,8 @@ android {
         targetSdk = 36
         // Dedicated 1000+ range: version codes must be unique across every artifact in the
         // listing, so the phone app counts 1, 2, 3, … and automotive 1001, 1002, …
-        versionCode = 1009
-        versionName = "1.0.19"
+        versionCode = 1010
+        versionName = "1.0.20"
     }
 
     signingConfigs {
@@ -58,5 +58,16 @@ android {
 }
 
 dependencies {
-    implementation(project(":core"))
+    // Cast is gated off in the car (PlayerManager never builds a CastPlayer on
+    // FEATURE_AUTOMOTIVE), but :core pulls play-services-cast-framework transitively via
+    // media3-cast. That framework's startup components (GoogleApiActivity, its providers, the
+    // gms.version meta-data) make head units without a current Google Play services show a
+    // "needs Google Play services" error on launch — stripping only the manifest meta-data was
+    // not enough, the error persisted. Excluding the whole GMS/datatransport dependency removes
+    // every trace from the car artifact. The media3-cast classes remain but are never loaded
+    // here; -dontwarn in proguard-rules.pro covers their now-absent GMS references.
+    implementation(project(":core")) {
+        exclude(group = "com.google.android.gms")
+        exclude(group = "com.google.android.datatransport")
+    }
 }

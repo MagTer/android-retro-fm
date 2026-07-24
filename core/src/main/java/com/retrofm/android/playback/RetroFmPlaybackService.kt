@@ -34,6 +34,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
 import timber.log.Timber
 import java.text.ParseException
 import java.text.SimpleDateFormat
@@ -198,28 +201,67 @@ class RetroFmPlaybackService : MediaLibraryService() {
         lastAppliedEventId = track.eventId
         Timber.tag("NowPlaying").d("apply eventId=%d '%s - %s'", track.eventId, track.title, track.artist)
 
-        val item = MediaItemTree.getStationItem()
-            .buildUpon()
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(track.title)
-                    .setArtist(track.artist)
-                    .setDisplayTitle(track.title)
-                    .setSubtitle(track.artist)
-                    .setArtworkUri(track.imageUrl?.let { Uri.parse(it) })
-                    .setIsBrowsable(false)
-                    .setIsPlayable(true)
-                    .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
-                    .build()
-            )
-            .build()
-
-        playerManager.updateMediaItem(item)
+        playerManager.updateMediaItem(buildStationItem(track, artworkData = null))
 
         // Live browse tile: the station's browse representation mirrors the current track,
         // so tell connected browsers (the car's media host) to re-fetch it.
         currentTrack = track
         mediaLibrarySession.notifyChildrenChanged(MediaItemTree.STATIONS_TAB_ID, 1, null)
+
+        // Then fetch the artwork bytes and re-apply them embedded (see embedArtwork).
+        embedArtwork(track)
+    }
+
+    /** The playing MediaItem carrying [track]'s metadata; [artworkData] embeds the raw image. */
+    private fun buildStationItem(track: TrackInfo, artworkData: ByteArray?): MediaItem {
+        val metadata = MediaMetadata.Builder()
+            .setTitle(track.title)
+            .setArtist(track.artist)
+            .setDisplayTitle(track.title)
+            .setSubtitle(track.artist)
+            .setArtworkUri(track.imageUrl?.let { Uri.parse(it) })
+            .setIsBrowsable(false)
+            .setIsPlayable(true)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
+        if (artworkData != null) {
+            metadata.setArtworkData(artworkData, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+        }
+        return MediaItemTree.getStationItem().buildUpon()
+            .setMediaMetadata(metadata.build())
+            .build()
+    }
+
+    /**
+     * The car's now-playing foreground renders the METADATA_KEY_ALBUM_ART *bitmap*; a URI-only
+     * item leaves that bitmap empty (the URI only feeds the ambient background), so the large
+     * art shows the default placeholder — the exact field symptom (background gradient shifts
+     * per track, foreground stays a placeholder). Fetch the image bytes and re-apply them as
+     * embedded artworkData so the large art renders. Runs after the text metadata is already
+     * live so the title/artist never wait on the download.
+     */
+    private fun embedArtwork(track: TrackInfo) {
+        val url = track.imageUrl ?: return
+        serviceScope.launch {
+            val bytes = withContext(Dispatchers.IO) {
+                runCatching {
+                    (URL(url).openConnection() as HttpURLConnection).run {
+                        connectTimeout = 5_000
+                        readTimeout = 5_000
+                        inputStream.use { it.readBytes() }
+                    }
+                }.getOrNull()
+            }
+            if (bytes == null) {
+                Timber.tag("Artwork").w("embed fetch failed for %s", url)
+                return@launch
+            }
+            // A newer track may have been applied while the download was in flight; and never
+            // push a large in-place update onto the cast route (see applyTrackMetadata).
+            if (currentTrack?.eventId != track.eventId || lastAppliedEventId != track.eventId) return@launch
+            if (playerManager.player.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE) return@launch
+            Timber.tag("Artwork").d("embed %d bytes for eventId=%d", bytes.size, track.eventId)
+            playerManager.updateMediaItem(buildStationItem(track, bytes))
+        }
     }
 
     /**
