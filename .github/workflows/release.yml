@@ -61,30 +61,15 @@ jobs:
             app/build/outputs/bundle/release/*.aab
             automotive/build/outputs/bundle/release/*.aab
 
-      - name: Release phone AAB to internal testing
+      # Both form factors go out in ONE internal release: Play routes each AAB by device
+      # (the automotive AAB requires android.hardware.type.automotive, so it only reaches the
+      # car; the phone AAB reaches phones). They MUST share a single release — two separate
+      # uploads to the same track would each replace the other's release on that track.
+      - name: Release phone + automotive to internal testing
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: com.magter.retrofm
-          releaseFiles: app/build/outputs/bundle/release/*.aab
+          releaseFiles: app/build/outputs/bundle/release/*.aab,automotive/build/outputs/bundle/release/*.aab
           track: internal
           status: completed
-
-      # Automotive is a separate form-factor track. Its Publishing-API track id must be
-      # confirmed once (it is NOT plain "internal"). Until then this step is skipped and the
-      # automotive AAB is available only as the run artifact above — nothing is falsely
-      # reported as released. To enable: set a repo variable AUTOMOTIVE_TRACK to the verified
-      # track id (Settings -> Secrets and variables -> Actions -> Variables). No YAML edit.
-      - name: Release automotive AAB to its form-factor track
-        if: vars.AUTOMOTIVE_TRACK != ''
-        uses: r0adkll/upload-google-play@v1
-        with:
-          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: com.magter.retrofm
-          releaseFiles: automotive/build/outputs/bundle/release/*.aab
-          track: ${{ vars.AUTOMOTIVE_TRACK }}
-          status: completed
-
-      - name: Note automotive not released
-        if: vars.AUTOMOTIVE_TRACK == ''
-        run: echo "::notice::Automotive AAB built and attached as a run artifact but NOT released — set the AUTOMOTIVE_TRACK repo variable to the verified form-factor track id to enable its upload."
