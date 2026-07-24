@@ -19,5 +19,14 @@
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
+
+        <!-- Serves remote album art as content:// URIs, the only artwork scheme AAOS renders.
+             exported so the car's media host (a separate process) can read the art; safe
+             because AlbumArtContentProvider only fetches an allowlisted set of image hosts. -->
+        <provider
+            android:name="com.retrofm.android.playback.AlbumArtContentProvider"
+            android:authorities="com.magter.retrofm.artwork"
+            android:exported="true"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>
