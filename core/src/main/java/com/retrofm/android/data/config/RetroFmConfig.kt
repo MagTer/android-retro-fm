@@ -53,6 +53,13 @@ object RetroFmConfig {
      */
     const val AD_DISPLAY_TITLE = "Reklam"
     const val AD_DISPLAY_SUBTITLE = "Sändningen fortsätter strax"
+    /**
+     * Live-countdown subtitle for the ad break, used to tick the car's now-playing subtitle
+     * (and the media notification) down to the unmute moment — the car can't run our own
+     * countdown UI like the phone, so we update the metadata text once a second. Wording
+     * mirrors the phone's R.string.ad_countdown. `%d` = whole seconds remaining.
+     */
+    const val AD_COUNTDOWN_FORMAT = "Sändningen börjar om %d s"
     /** Sentinel eventId for the ad-branding metadata (never collides with API event ids). */
     const val AD_EVENT_ID = -2L
 

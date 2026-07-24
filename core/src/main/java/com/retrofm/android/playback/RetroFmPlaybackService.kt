@@ -58,6 +58,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
     private var currentTrack: TrackInfo? = null
     private var adUntilElapsedMs: Long? = null
     private var adUnmuteJob: Job? = null
+    private var adCountdownJob: Job? = null
     private var preAdVolume: Float? = null
     // A real track title that arrived (via polling) while an ad break was active — held back
     // so it can't replace the "Reklam" label over muted audio, applied when the break lifts.
@@ -227,6 +228,43 @@ class RetroFmPlaybackService : MediaLibraryService() {
             .build()
     }
 
+    /** The ad-branding MediaItem with a live [subtitle] (the countdown), title stays "Reklam". */
+    private fun buildAdItem(subtitle: String): MediaItem {
+        val metadata = MediaMetadata.Builder()
+            .setTitle(RetroFmConfig.AD_DISPLAY_TITLE)
+            .setArtist(subtitle)
+            .setDisplayTitle(RetroFmConfig.AD_DISPLAY_TITLE)
+            .setSubtitle(subtitle)
+            .setArtworkUri(AlbumArtContentProvider.mapUri(Uri.parse(RetroFmConfig.LOGO_PNG_URL)))
+            .setIsBrowsable(false)
+            .setIsPlayable(true)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
+            .build()
+        return MediaItemTree.getStationItem().buildUpon()
+            .setMediaMetadata(metadata)
+            .build()
+    }
+
+    /**
+     * Ticks the ad subtitle down to [untilElapsedMs] (the unmute deadline) once a second by
+     * pushing metadata updates — the only channel the car's system-drawn now-playing gives us.
+     * Uses ceil seconds to stay in step with the phone's own extras-driven countdown. Skips the
+     * remote (cast) route, where the receiver runs its own preroll we can't measure.
+     */
+    private fun startAdCountdown(untilElapsedMs: Long) {
+        adCountdownJob?.cancel()
+        adCountdownJob = serviceScope.launch {
+            while (isActive) {
+                if (playerManager.player.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE) break
+                val remainingMs = untilElapsedMs - SystemClock.elapsedRealtime()
+                if (remainingMs <= 0) break
+                val secs = ((remainingMs + 999) / 1000).toInt()
+                playerManager.updateMediaItem(buildAdItem(RetroFmConfig.AD_COUNTDOWN_FORMAT.format(secs)))
+                delay(1_000)
+            }
+        }
+    }
+
     /**
      * Publishes "an ad is playing until X" to all controllers via session extras. The deadline
      * is on the [SystemClock.elapsedRealtime] clock (monotonic, shared across processes).
@@ -253,6 +291,9 @@ class RetroFmPlaybackService : MediaLibraryService() {
                 finishTime = null
             )
         )
+        // The car has no room for our own countdown UI (the system draws now-playing), so tick
+        // the ad subtitle down to the unmute moment via one-per-second metadata updates.
+        startAdCountdown(untilElapsedMs)
         if (RetroFmConfig.MUTE_ADS) {
             // Back-to-back ads re-announce themselves: only capture the volume on the first,
             // so a mid-break marker can't overwrite the saved level with our own 0.
@@ -276,6 +317,8 @@ class RetroFmPlaybackService : MediaLibraryService() {
         adUntilElapsedMs = null
         adUnmuteJob?.cancel()
         adUnmuteJob = null
+        adCountdownJob?.cancel()
+        adCountdownJob = null
         preAdVolume?.let { playerManager.player.volume = it }
         preAdVolume = null
         mediaLibrarySession.setSessionExtras(Bundle())
