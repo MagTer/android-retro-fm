@@ -1,6 +1,9 @@
 package com.retrofm.android
 
 import android.app.Application
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -33,15 +36,25 @@ class RetroFmApplication : Application() {
 
         val key = BuildConfig.LOGSINK_KEY
         if (key.isNotBlank()) {
-            // Disk spool: mirror logs locally so a boot that dies before its in-memory buffer
-            // can flush is not lost (see DiskLogTree) — the no-internet-at-boot restarts were
-            // invisible for exactly this reason. Read what the previous session left behind
-            // (only present after an abnormal termination), then start the spool fresh.
+            // Disk spool mirrors logs locally so a boot that dies before its in-memory buffer
+            // can flush is not lost — the no-internet-at-boot restarts were invisible for exactly
+            // that reason. Two files: `spool` = the current session's lines; `pending` = the
+            // accumulated lines of previous sessions that never confirmed shipping. At startup we
+            // FOLD the previous session's spool into pending (never discard it — an earlier bug
+            // truncated on read, so a chain of offline boots ate each other), then replay pending.
+            // pending is deleted only on a graceful ON_STOP after a flush (confirmed delivery).
             val spool = File(filesDir, "logsink-spool.txt")
-            val previousBoot = runCatching {
-                if (spool.exists()) spool.readText() else ""
-            }.getOrDefault("")
-            runCatching { spool.writeText("") }
+            val pending = File(filesDir, "logsink-pending.txt")
+            runCatching {
+                val prev = if (spool.exists()) spool.readText() else ""
+                if (prev.isNotBlank()) {
+                    pending.appendText(prev)
+                    spool.writeText("")
+                    if (pending.length() > MAX_SPOOL_BYTES) {
+                        pending.writeText(pending.readText().takeLast(MAX_SPOOL_BYTES))
+                    }
+                }
+            }
             Timber.plant(DiskLogTree(spool))
 
             val client = LogsinkClient(
@@ -51,13 +64,16 @@ class RetroFmApplication : Application() {
                 device = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
             )
             Timber.plant(LogsinkTree(client))
-            // Replay the previous (abnormally terminated) session's spooled lines — this is how
-            // the never-before-seen no-internet boots finally reach the sink.
-            if (previousBoot.isNotBlank()) {
+            // Replay everything that never confirmed shipping — this is how the never-before-seen
+            // no-internet boots finally reach the sink.
+            val pendingText = runCatching {
+                if (pending.exists()) pending.readText() else ""
+            }.getOrDefault("")
+            if (pendingText.isNotBlank()) {
                 Timber.tag(DiskLogTree.REPLAY_TAG).w(
-                    "---- previous boot spool (%d bytes) ----", previousBoot.length
+                    "---- replaying %d bytes of unshipped boots ----", pendingText.length
                 )
-                previousBoot.lineSequence().filter { it.isNotBlank() }.forEach {
+                pendingText.lineSequence().filter { it.isNotBlank() }.forEach {
                     Timber.tag(DiskLogTree.REPLAY_TAG).i(it)
                 }
             }
@@ -70,6 +86,20 @@ class RetroFmApplication : Application() {
                 Timber.tag("Lifecycle").i(
                     "app process start vc=%d vn=%s",
                     PackageInfoCompat.getLongVersionCode(pi), pi.versionName
+                )
+            }
+            // Network state in the FIRST lines logged, so it rides the earliest buffer flush —
+            // proven to escape even a boot that dies almost immediately (that is all vc1110 ever
+            // shipped). Answers the load-bearing question directly: did the car have real
+            // internet the instant it launched, when the "Something went wrong" dialog appears?
+            runCatching {
+                val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                val caps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+                Timber.tag("Network").i(
+                    "boot connectivity: activeNetwork=%b internet=%b validated=%b",
+                    cm.activeNetwork != null,
+                    caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true,
+                    caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
                 )
             }
             // Ship crashes before dying: field evidence (Volvo 2026-07-23) showed silent
@@ -90,13 +120,21 @@ class RetroFmApplication : Application() {
                     if (event == Lifecycle.Event.ON_STOP) {
                         ProcessLifecycleOwner.get().lifecycleScope.launch {
                             client.flush()
-                            // Graceful background: logs shipped, so drop the spool. Only abnormal
-                            // deaths (which never reach ON_STOP) leave a spool to replay.
+                            // Graceful background after a flush = confirmed delivery: drop both the
+                            // current spool and the replayed pending backlog. Only abnormal deaths
+                            // (which never reach ON_STOP) keep data for the next boot to replay.
                             runCatching { spool.writeText("") }
+                            runCatching { if (pending.exists()) pending.delete() }
                         }
                     }
                 }
             )
         }
+    }
+
+    private companion object {
+        // Cap the offline backlog so a long connectivity outage can't grow the spool without
+        // bound; keep the most recent lines (drop-oldest).
+        const val MAX_SPOOL_BYTES = 256 * 1024
     }
 }

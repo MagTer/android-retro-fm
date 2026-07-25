@@ -17,10 +17,16 @@ import java.io.File
 class DiskLogTree(private val spool: File) : Timber.Tree() {
     override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
         if (tag == REPLAY_TAG) return
-        runCatching { spool.appendText("$priority|${tag ?: ""}|$message\n") }
+        runCatching {
+            spool.appendText("$priority|${tag ?: ""}|$message\n")
+            if (spool.length() > MAX_BYTES) {
+                spool.writeText(spool.readText().takeLast(MAX_BYTES))
+            }
+        }
     }
 
     companion object {
         const val REPLAY_TAG = "Replay"
+        private const val MAX_BYTES = 256 * 1024
     }
 }
