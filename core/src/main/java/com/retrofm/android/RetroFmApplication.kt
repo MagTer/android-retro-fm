@@ -8,6 +8,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.core.content.pm.PackageInfoCompat
 import com.retrofm.android.core.BuildConfig
+import java.io.File
 import com.retrofm.android.data.config.RetroFmConfig
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -32,6 +33,17 @@ class RetroFmApplication : Application() {
 
         val key = BuildConfig.LOGSINK_KEY
         if (key.isNotBlank()) {
+            // Disk spool: mirror logs locally so a boot that dies before its in-memory buffer
+            // can flush is not lost (see DiskLogTree) — the no-internet-at-boot restarts were
+            // invisible for exactly this reason. Read what the previous session left behind
+            // (only present after an abnormal termination), then start the spool fresh.
+            val spool = File(filesDir, "logsink-spool.txt")
+            val previousBoot = runCatching {
+                if (spool.exists()) spool.readText() else ""
+            }.getOrDefault("")
+            runCatching { spool.writeText("") }
+            Timber.plant(DiskLogTree(spool))
+
             val client = LogsinkClient(
                 ingestUrl = RetroFmConfig.LOGSINK_INGEST_URL,
                 apiKey = key,
@@ -39,6 +51,16 @@ class RetroFmApplication : Application() {
                 device = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
             )
             Timber.plant(LogsinkTree(client))
+            // Replay the previous (abnormally terminated) session's spooled lines — this is how
+            // the never-before-seen no-internet boots finally reach the sink.
+            if (previousBoot.isNotBlank()) {
+                Timber.tag(DiskLogTree.REPLAY_TAG).w(
+                    "---- previous boot spool (%d bytes) ----", previousBoot.length
+                )
+                previousBoot.lineSequence().filter { it.isNotBlank() }.forEach {
+                    Timber.tag(DiskLogTree.REPLAY_TAG).i(it)
+                }
+            }
             // Marks every process (re)start with the actually-installed version — so a version
             // that changes across a restart proves Play applied an update at that moment (the
             // suspected cause of the launcher's "Something went wrong / update Google Play"
@@ -66,7 +88,12 @@ class RetroFmApplication : Application() {
             ProcessLifecycleOwner.get().lifecycle.addObserver(
                 LifecycleEventObserver { _, event ->
                     if (event == Lifecycle.Event.ON_STOP) {
-                        ProcessLifecycleOwner.get().lifecycleScope.launch { client.flush() }
+                        ProcessLifecycleOwner.get().lifecycleScope.launch {
+                            client.flush()
+                            // Graceful background: logs shipped, so drop the spool. Only abnormal
+                            // deaths (which never reach ON_STOP) leave a spool to replay.
+                            runCatching { spool.writeText("") }
+                        }
                     }
                 }
             )
