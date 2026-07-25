@@ -6,6 +6,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import androidx.core.content.pm.PackageInfoCompat
 import com.retrofm.android.core.BuildConfig
 import com.retrofm.android.data.config.RetroFmConfig
 import kotlinx.coroutines.launch
@@ -38,6 +39,17 @@ class RetroFmApplication : Application() {
                 device = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
             )
             Timber.plant(LogsinkTree(client))
+            // Marks every process (re)start with the actually-installed version — so a version
+            // that changes across a restart proves Play applied an update at that moment (the
+            // suspected cause of the launcher's "Something went wrong / update Google Play"
+            // dialog: a stale resumed process meeting a freshly-swapped APK).
+            runCatching {
+                val pi = packageManager.getPackageInfo(packageName, 0)
+                Timber.tag("Lifecycle").i(
+                    "app process start vc=%d vn=%s",
+                    PackageInfoCompat.getLongVersionCode(pi), pi.versionName
+                )
+            }
             // Ship crashes before dying: field evidence (Volvo 2026-07-23) showed silent
             // process-restart loops — the crash itself never reached the sink because the
             // buffer dies with the process. Log at ERROR, force a bounded flush, then hand

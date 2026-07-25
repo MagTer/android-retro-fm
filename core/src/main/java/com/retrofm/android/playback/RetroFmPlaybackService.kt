@@ -74,6 +74,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
+        Timber.tag("Lifecycle").i("service onCreate")
         playerManager = PlayerManager(this, serviceScope)
         // playerManager.player is the unified CastPlayer on the phone build (local+remote),
         // or plain ExoPlayer where Cast is unavailable — see PlayerManager.player.
@@ -94,12 +95,14 @@ class RetroFmPlaybackService : MediaLibraryService() {
         // Resolved by package at runtime rather than a compile-time Activity reference, since
         // this class is shared between the phone module (has a launcher Activity) and the
         // Android Automotive OS module (must not declare one).
-        packageManager.getLaunchIntentForPackage(packageName)?.let { launchIntent ->
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+        Timber.tag("Lifecycle").d("launcher activity present=%b", launchIntent != null)
+        launchIntent?.let {
             sessionBuilder.setSessionActivity(
                 PendingIntent.getActivity(
                     this,
                     0,
-                    launchIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                    it.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
                     PendingIntent.FLAG_IMMUTABLE
                 )
             )
@@ -119,7 +122,13 @@ class RetroFmPlaybackService : MediaLibraryService() {
         return mediaLibrarySession
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Timber.tag("Lifecycle").d("onStartCommand action=%s", intent?.action)
+        return super.onStartCommand(intent, flags, startId)
+    }
+
     override fun onDestroy() {
+        Timber.tag("Lifecycle").i("service onDestroy")
         metadataJob?.cancel()
         serviceScope.cancel()
         mediaLibrarySession.release()
