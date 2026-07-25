@@ -20,6 +20,25 @@
         <meta-data
             android:name="com.android.automotive"
             android:resource="@xml/automotive_app_desc" />
+
+        <!-- Launcher entry point. A media-only app (service, no activity) made the Volvo
+             launcher fail to "open the app" and show "Something went wrong / check Google Play"
+             at boot, even with validated internet — the last structural difference from apps
+             that launch cleanly. Trivial + distractionOptimized so it is allowed while driving. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@android:style/Theme.DeviceDefault">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="distractionOptimized"
+                android:value="true" />
+        </activity>
+
         <!-- Cast/Google Play services are excluded from this artifact entirely; see the
              dependency exclude in build.gradle.kts. -->
     </application>
