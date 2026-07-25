@@ -472,6 +472,28 @@ class RetroFmPlaybackService : MediaLibraryService() {
     }
 
     private inner class RetroFmMediaLibraryCallback : MediaLibrarySession.Callback {
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): MediaSession.ConnectionResult {
+            // Log EVERY controller that connects — including the car launcher / any Google
+            // verification client — so we can see whether the "check Google Play" flow ever
+            // reaches us and what it is. We accept all (default).
+            Timber.tag("Connect").i(
+                "onConnect from %s uid=%d controllerVersion=%d",
+                controller.packageName, controller.uid, controller.controllerVersion
+            )
+            return super.onConnect(session, controller)
+        }
+
+        override fun onPostConnect(session: MediaSession, controller: MediaSession.ControllerInfo) {
+            Timber.tag("Connect").d("onPostConnect %s", controller.packageName)
+        }
+
+        override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
+            Timber.tag("Connect").i("onDisconnected %s", controller.packageName)
+        }
+
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,

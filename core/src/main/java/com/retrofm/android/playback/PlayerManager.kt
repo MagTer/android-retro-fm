@@ -114,14 +114,39 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
     // the current network at registration — harmless: with no player error it's a no-op.
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
-            if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+            val validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            val internet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            Timber.tag("Network").d("capabilities: internet=%b validated=%b", internet, validated)
+            if (validated) {
                 scope.launch { retryNowIfRecovering() }
             }
+        }
+
+        override fun onAvailable(network: Network) {
+            Timber.tag("Network").d("network available")
+        }
+
+        override fun onLost(network: Network) {
+            Timber.tag("Network").w("network lost")
         }
     }
 
     init {
         connectivityManager.registerDefaultNetworkCallback(networkCallback)
+        logNetworkSnapshot()
+    }
+
+    /** One-shot snapshot of connectivity at process start — tests whether the car has real
+     *  internet the moment it launches us (the suspected trigger for launch-time verification). */
+    private fun logNetworkSnapshot() {
+        val net = connectivityManager.activeNetwork
+        val caps = net?.let { connectivityManager.getNetworkCapabilities(it) }
+        Timber.tag("Network").i(
+            "startup snapshot: activeNetwork=%b internet=%b validated=%b",
+            net != null,
+            caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true,
+            caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+        )
     }
 
     fun play() {
@@ -192,9 +217,25 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
 
     private inner class PlayerEventListener : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
+            val name = when (playbackState) {
+                Player.STATE_IDLE -> "IDLE"
+                Player.STATE_BUFFERING -> "BUFFERING"
+                Player.STATE_READY -> "READY"
+                Player.STATE_ENDED -> "ENDED"
+                else -> "?$playbackState"
+            }
+            Timber.tag(TAG).d("playbackState=%s playWhenReady=%b", name, player.playWhenReady)
             if (playbackState == Player.STATE_READY) {
                 reconnectAttempts = 0
             }
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            Timber.tag(TAG).i("isPlaying=%b", isPlaying)
+        }
+
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            Timber.tag(TAG).d("playWhenReady=%b reason=%d", playWhenReady, reason)
         }
 
         override fun onPlayerError(error: PlaybackException) {
