@@ -281,6 +281,14 @@ class RetroFmPlaybackService : MediaLibraryService() {
      * device volume) until the announced duration elapses or regular track metadata arrives.
      */
     private fun setAdState(untilElapsedMs: Long) {
+        // Ad handling (label, countdown, mute) only makes sense during active playback. ExoPlayer
+        // buffers the live stream — and reads its ICY ad markers — even before the user presses
+        // play, which surfaced the "Reklam" countdown pre-play. Ignore ad markers until playback
+        // is actually wanted; a real ad on air when play starts is caught by the next marker.
+        if (!playerManager.player.playWhenReady) {
+            Timber.tag("NowPlaying").d("ad marker ignored — playback not started")
+            return
+        }
         Timber.tag("NowPlaying").d("ad break starts, until=+%d ms", untilElapsedMs - SystemClock.elapsedRealtime())
         adUntilElapsedMs = untilElapsedMs
         mediaLibrarySession.setSessionExtras(
