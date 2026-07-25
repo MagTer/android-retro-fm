@@ -11,6 +11,7 @@ import timber.log.Timber
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Serves remote album art to Android Automotive OS through a local content:// URI.
@@ -44,6 +45,10 @@ class AlbumArtContentProvider : ContentProvider() {
             runCatching { String(Base64.decode(token, B64)) }.getOrNull()
     }
 
+    // Per-image locks so concurrent requests for the same art download it once (see openFile).
+    private val locks = ConcurrentHashMap<String, Any>()
+    private fun lockFor(token: String): Any = locks.getOrPut(token) { Any() }
+
     override fun onCreate(): Boolean = true
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
@@ -59,21 +64,28 @@ class AlbumArtContentProvider : ContentProvider() {
 
         val cacheDir = File(ctx.cacheDir, "albumart").apply { mkdirs() }
         val file = File(cacheDir, token)
-        if (!file.exists() || file.length() == 0L) {
-            val tmp = File(cacheDir, "$token.tmp")
-            val ok = runCatching {
-                (URL(remote).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 5_000
-                    readTimeout = 5_000
-                }.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it) } }
-                tmp.renameTo(file)
-            }.getOrDefault(false)
-            if (!ok || !file.exists()) {
-                tmp.delete()
-                Timber.tag("Artwork").w("content-provider download failed for %s", host)
-                return null
+        // Serialize concurrent requests for the SAME image. The car asks from several surfaces
+        // at once (now-playing, browse tile, launcher); they previously raced on a shared temp
+        // file, so one download won and the rest failed the rename — logging a spurious
+        // "download failed" and returning no bitmap to that surface. One download, the rest read
+        // the cache. Each download uses a unique temp file so a rename never collides.
+        synchronized(lockFor(token)) {
+            if (!file.exists() || file.length() == 0L) {
+                val tmp = File.createTempFile(token.take(40), ".tmp", cacheDir)
+                val ok = runCatching {
+                    (URL(remote).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 5_000
+                        readTimeout = 5_000
+                    }.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                    tmp.renameTo(file)
+                }.getOrDefault(false)
+                if (!ok) tmp.delete()
+                if (!file.exists() || file.length() == 0L) {
+                    Timber.tag("Artwork").w("content-provider download failed for %s", host)
+                    return null
+                }
+                Timber.tag("Artwork").d("content-provider cached %d bytes from %s", file.length(), host)
             }
-            Timber.tag("Artwork").d("content-provider cached %d bytes from %s", file.length(), host)
         }
         return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
     }
