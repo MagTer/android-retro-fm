@@ -7,6 +7,8 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.util.Base64
+import com.retrofm.android.core.R
+import com.retrofm.android.data.config.RetroFmConfig
 import timber.log.Timber
 import java.io.File
 import java.net.HttpURLConnection
@@ -73,10 +75,19 @@ class AlbumArtContentProvider : ContentProvider() {
             if (!file.exists() || file.length() == 0L) {
                 val tmp = File.createTempFile(token.take(40), ".tmp", cacheDir)
                 val ok = runCatching {
-                    (URL(remote).openConnection() as HttpURLConnection).apply {
-                        connectTimeout = 5_000
-                        readTimeout = 5_000
-                    }.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                    if (remote == RetroFmConfig.LOGO_PNG_URL) {
+                        // The station logo ships inside the APK: browse tiles, the idle state
+                        // and the ad card must render with ZERO network — the car asks for
+                        // them at boot, before the user presses play and often before the
+                        // modem has real internet.
+                        ctx.resources.openRawResource(R.raw.station_logo)
+                            .use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                    } else {
+                        (URL(remote).openConnection() as HttpURLConnection).apply {
+                            connectTimeout = 5_000
+                            readTimeout = 5_000
+                        }.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                    }
                     tmp.renameTo(file)
                 }.getOrDefault(false)
                 if (!ok) tmp.delete()

@@ -14,6 +14,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -75,33 +76,87 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
      * All playback control is routed through this property: when not casting, [CastPlayer]
      * delegates to the wrapped [exoPlayer]; when casting, it targets the receiver.
      */
-    val player: Player = if (
-        context.packageManager.hasSystemFeature(PackageManager.FEATURE_AUTOMOTIVE)
-    ) {
-        // Never probe Cast on Automotive OS — the phone APK can be installed in cars via the
-        // Play device catalog, and the cast framework then nags about the car's Play services
-        // version. Casting from a car makes no sense anyway.
-        exoPlayer
-    } else {
-        try {
-            CastPlayer.Builder(context)
-                .setLocalPlayer(exoPlayer)
-                .setRemotePlayer(
-                    RemoteCastPlayer.Builder(context)
-                        // Marks the stream LIVE for the receiver; the default converter's
-                        // BUFFERED type left the Default Media Receiver loading forever.
-                        .setMediaItemConverter(RetroFmMediaItemConverter())
-                        .build()
-                )
-                .build()
-        } catch (e: Exception) {
-            // No Play services / no cast meta-data (e.g. :automotive) → local-only.
+    val player: Player = PlayGatedPlayer(
+        if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_AUTOMOTIVE)) {
+            // Never probe Cast on Automotive OS — the phone APK can be installed in cars via the
+            // Play device catalog, and the cast framework then nags about the car's Play services
+            // version. Casting from a car makes no sense anyway.
             exoPlayer
+        } else {
+            try {
+                CastPlayer.Builder(context)
+                    .setLocalPlayer(exoPlayer)
+                    .setRemotePlayer(
+                        RemoteCastPlayer.Builder(context)
+                            // Marks the stream LIVE for the receiver; the default converter's
+                            // BUFFERED type left the Default Media Receiver loading forever.
+                            .setMediaItemConverter(RetroFmMediaItemConverter())
+                            .build()
+                    )
+                    .build()
+            } catch (e: Exception) {
+                // No Play services / no cast meta-data (e.g. :automotive) → local-only.
+                exoPlayer
+            }
         }
-    }.apply {
+    ).apply {
         setMediaItem(MediaItemTree.getStationItem())
-        playWhenReady = false
         addListener(PlayerEventListener())
+    }
+
+    /**
+     * Gates every network-touching player transition on the user actually wanting playback.
+     *
+     * The car's media host calls prepare() on the session the moment it binds at boot — a
+     * prefetch. Un-gated, that opened the live stream minutes before the user pressed play:
+     * data spent, artwork fetched, and — worst — the connect-time preroll ad announced its ICY
+     * marker while playWhenReady was still false, so the marker was ignored and the buffered
+     * preroll later played UNMUTED when the user finally pressed play. That is why ad handling
+     * looked intermittent: it depended on whether the boot prefetch or the user opened the
+     * stream.
+     *
+     * Rules, applying to every control surface (car UI, phone UI, voice, media buttons) because
+     * the session drives this wrapped player directly:
+     *  - prepare() is a no-op until playback is requested — nothing touches the network before
+     *    play. Play flows that prepare-then-play still work: the play half prepares itself.
+     *  - play (= setPlayWhenReady(true)) self-prepares from IDLE/ENDED, and a resume from pause
+     *    first seeks to the live edge — the radio convention (never replay a stale buffer),
+     *    and the invariant clearAdState-on-pause relies on.
+     */
+    private inner class PlayGatedPlayer(delegate: Player) : ForwardingPlayer(delegate) {
+        override fun prepare() {
+            if (!playWhenReady) {
+                Timber.tag(TAG).d("prepare gated — playback not requested yet")
+                return
+            }
+            super.prepare()
+        }
+
+        override fun play() = setPlayWhenReady(true)
+
+        override fun setPlayWhenReady(playWhenReady: Boolean) {
+            if (!playWhenReady) {
+                super.setPlayWhenReady(false)
+                return
+            }
+            when {
+                playbackState == Player.STATE_IDLE -> {
+                    super.setPlayWhenReady(true)
+                    super.prepare()
+                }
+                playbackState == Player.STATE_ENDED -> {
+                    super.seekToDefaultPosition()
+                    super.setPlayWhenReady(true)
+                    super.prepare()
+                }
+                !this.playWhenReady -> {
+                    // Resume from pause: back to the live edge, never the stale buffer.
+                    super.seekToDefaultPosition()
+                    super.setPlayWhenReady(true)
+                }
+                else -> super.setPlayWhenReady(true)
+            }
+        }
     }
 
     private val connectivityManager =
@@ -149,21 +204,6 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
         )
     }
 
-    fun play() {
-        if (player.playbackState == Player.STATE_IDLE) {
-            player.prepare()
-        } else if (!player.isPlaying) {
-            // Radio convention: resuming from pause jumps back to the live edge
-            // rather than replaying a stale buffer.
-            player.seekToDefaultPosition()
-        }
-        player.play()
-    }
-
-    fun pause() {
-        player.pause()
-    }
-
     fun release() {
         connectivityManager.unregisterNetworkCallback(networkCallback)
         reconnectJob?.cancel()
@@ -186,6 +226,8 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
     private fun retryNowIfRecovering() {
         val waitingToReconnect = reconnectJob?.isActive == true || player.playerError != null
         if (!waitingToReconnect || !wasPlayingBeforeError) return
+        // playWhenReady is the live truth — the user may have paused since the error.
+        if (!player.playWhenReady) return
         reconnectJob?.cancel()
         reconnectAttempts = 0
         player.prepare()
@@ -208,6 +250,8 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
             delay(delayMs)
+            // The user may have pressed pause while we waited — a paused player must stay quiet.
+            if (!player.playWhenReady) return@launch
             // prepare() reopens the live stream at the live edge, so recovery is never stale.
             // On the cast route this re-loads the stream on the receiver — acceptable.
             player.prepare()

@@ -354,8 +354,13 @@ class RetroFmPlaybackService : MediaLibraryService() {
                 startMetadataPolling()
             } else {
                 stopMetadataPolling()
-                // A paused live stream resumes at the live edge, where this ad is over.
-                clearAdState()
+                // isPlaying also drops during a mid-ad REBUFFER (playWhenReady still true) —
+                // clearing then unmuted the tail of the ad after every stall, which made ad
+                // muting look intermittent in the car. Only a real pause clears: a paused
+                // stream resumes at the live edge (PlayGatedPlayer), where this ad is over.
+                if (!playerManager.player.playWhenReady) {
+                    clearAdState()
+                }
             }
         }
 
@@ -383,6 +388,14 @@ class RetroFmPlaybackService : MediaLibraryService() {
         // the deadline drifting late when playback stalls mid-ad. Only fires on the local
         // route: while casting the receiver fetches the stream itself, so no false labels.
         override fun onMetadata(metadata: Metadata) {
+            // No ICY processing unless playback is wanted. Normally the PlayGatedPlayer means
+            // the stream isn't even open before play, but a paused player keeps buffering its
+            // tail for a while — those frames must not fetch eventdata, flip metadata, or
+            // engage ad state. Resume re-syncs at the live edge within seconds.
+            if (!playerManager.player.playWhenReady) {
+                Timber.tag("NowPlaying").d("icy ignored — playback not requested")
+                return
+            }
             for (i in 0 until metadata.length()) {
                 val icy = metadata.get(i) as? IcyInfo ?: continue
                 val durationMs = IcyAdMarker.parseDurationMs(icy.rawMetadata)
