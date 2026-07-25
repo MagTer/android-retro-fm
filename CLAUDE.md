@@ -39,6 +39,13 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
 - versionCode ranges are load-bearing: phone stays < 1000, automotive 1000+, so the car always
   prefers the automotive artifact.
 - `.github/workflows/list-tracks.yml` is a diagnostic that prints the app's real Play track names.
+- **Play "Automatic integrity protection" must stay OFF** (Play Console → App integrity). When on,
+  Play injects a pairip licensing stub into the served APK; at car boot it can't reach the
+  not-yet-started Play Store, shows a repeating "check that Google Play is enabled" dialog and
+  kills the process — CarMediaService respawns the last media source, looping the dialog for
+  minutes (root-caused 2026-07-25, fixed by disabling the toggle + shipping 1.0.34). It is a
+  console-side toggle with no trace in this repo, and Play may enable it by default in release
+  flows — check it if the boot dialog ever returns.
 
 ## Conventions & gotchas
 
