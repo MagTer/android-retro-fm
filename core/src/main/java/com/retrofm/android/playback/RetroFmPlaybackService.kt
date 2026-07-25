@@ -513,6 +513,18 @@ class RetroFmPlaybackService : MediaLibraryService() {
                 "onGetLibraryRoot from %s (recent=%b, suggested=%b)",
                 browser.packageName, params?.isRecent == true, params?.isSuggested == true
             )
+            // Opt out of media resumption: the RECENT root is what the car uses to auto-resume
+            // the last media app at boot. That auto-launch happens during the ~2 min window when
+            // the Play Store isn't ready yet, so the launcher's Play verification of this
+            // internal-testing app fails and shows "check that Google Play is enabled" on repeat.
+            // Declining the recent root means the car won't auto-launch us at boot — the user
+            // starts playback manually once things have settled (and Play is up).
+            if (params?.isRecent == true) {
+                Timber.tag("MediaLibrary").d("declining recent root (no auto-resume)")
+                return Futures.immediateFuture(
+                    LibraryResult.ofError(LibraryResult.RESULT_ERROR_NOT_SUPPORTED)
+                )
+            }
             return Futures.immediateFuture(
                 LibraryResult.ofItem(MediaItemTree.getRootItem(), params)
             )
