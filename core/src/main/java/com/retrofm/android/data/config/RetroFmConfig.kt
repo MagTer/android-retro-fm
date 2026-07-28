@@ -27,6 +27,16 @@ object RetroFmConfig {
     const val METADATA_POLL_MIN_INTERVAL_MS = 2_000L
 
     /**
+     * Poll cadence while the nowplaying API answers with an already-finished event (ad/talk
+     * blocks, or the API lagging whole songs — see SCHEDULE_EVENT_STALE_AFTER_MS). Escalates
+     * one step per consecutive such answer and holds at the last value; any answer whose
+     * finish is still ahead resets it. Keeps the 2 s METADATA_POLL_MIN_INTERVAL_MS floor
+     * reserved for its legitimate case — an event finishing in the immediate future — instead
+     * of hammering the API for minutes during stale blocks (field logs 2026-07-28).
+     */
+    val METADATA_POLL_PAST_FINISH_BACKOFF_MS = listOf(2_000L, 5_000L, 10_000L, 30_000L)
+
+    /**
      * Backoff schedule for stream reconnect attempts after a player error. Escalates and then
      * holds at the last value — reconnect is retried indefinitely while playback is wanted (no
      * hard give-up), so the stream self-heals whenever validated internet returns.

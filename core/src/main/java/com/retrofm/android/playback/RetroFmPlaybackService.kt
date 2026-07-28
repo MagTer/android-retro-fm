@@ -153,6 +153,8 @@ class RetroFmPlaybackService : MediaLibraryService() {
         if (icyDriven) return
         if (metadataJob?.isActive == true) return
         metadataJob = serviceScope.launch {
+            // Consecutive answers whose event already finished — drives the poll backoff.
+            var pastFinishStreak = 0
             while (isActive) {
                 val delayMs = nowPlayingRepository.fetchNowPlaying().fold(
                     onSuccess = { track ->
@@ -161,9 +163,19 @@ class RetroFmPlaybackService : MediaLibraryService() {
                                 "poll result stale eventId=%d finish=%s — not applied",
                                 track.eventId, track.finishTime
                             )
-                            RetroFmConfig.METADATA_POLL_MIN_INTERVAL_MS
                         } else {
                             applyTrackMetadata(track)
+                        }
+                        val finishMillis = track.finishTime?.let { parseEventTimeMillis(it) }
+                        if (finishMillis != null && finishMillis <= System.currentTimeMillis()) {
+                            // The API is sitting on an ended event (ad/talk block, or plain
+                            // lag): back off instead of riding the 2 s floor until it flips.
+                            RetroFmConfig.METADATA_POLL_PAST_FINISH_BACKOFF_MS
+                                .getOrElse(pastFinishStreak++) {
+                                    RetroFmConfig.METADATA_POLL_PAST_FINISH_BACKOFF_MS.last()
+                                }
+                        } else {
+                            pastFinishStreak = 0
                             nextPollDelayMs(track.finishTime)
                         }
                     },
