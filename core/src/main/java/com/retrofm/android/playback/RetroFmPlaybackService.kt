@@ -59,6 +59,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
     private var adUntilElapsedMs: Long? = null
     private var adUnmuteJob: Job? = null
     private var adCountdownJob: Job? = null
+    private var staleInfoJob: Job? = null
     private var preAdVolume: Float? = null
     // A real track title that arrived (via polling) while an ad break was active — held back
     // so it can't replace the "Reklam" label over muted audio, applied when the break lifts.
@@ -322,13 +323,14 @@ class RetroFmPlaybackService : MediaLibraryService() {
             adUnmuteJob = serviceScope.launch {
                 delay(untilElapsedMs - SystemClock.elapsedRealtime())
                 // Fallback unmute at the announced deadline; usually the ad-end metadata
-                // (clearAdState via onMetadata) lands first or shortly after.
-                clearAdState()
+                // (clearAdState via onMetadata) lands first or shortly after. This path has
+                // no ICY frame carrying the on-air track, so ask for a now-playing resync.
+                clearAdState(resyncNowPlaying = true)
             }
         }
     }
 
-    private fun clearAdState() {
+    private fun clearAdState(resyncNowPlaying: Boolean = false) {
         if (adUntilElapsedMs == null) return
         Timber.tag("NowPlaying").d("ad break cleared")
         adUntilElapsedMs = null
@@ -342,15 +344,69 @@ class RetroFmPlaybackService : MediaLibraryService() {
         // Restore the real track the moment the break lifts. adUntilElapsedMs is already null,
         // so this apply is no longer suppressed; an ICY ad-end frame (if that is what cleared
         // the break) applies its own track right after, deduped if identical.
-        pendingAdTrack?.let { pending ->
+        val pending = pendingAdTrack
+        pendingAdTrack = null
+        when {
+            pending != null -> applyTrackMetadata(pending)
+            resyncNowPlaying -> resyncNowPlayingAfterAdBreak()
+        }
+    }
+
+    /**
+     * A break that ends at its announced deadline leaves the display with no source of truth:
+     * ICY only announces *changes*, and a preroll (every fresh connect/reconnect) joins the
+     * live program mid-song — that song's ICY frame was spliced long before we connected, so
+     * no frame will ever restore it. The schedule polling that would have covered the gap is
+     * latched off once [icyDriven]. One-shot now-playing fetch to resync the display; anything
+     * fresher that lands meanwhile (an ICY boundary, a new ad marker) wins over the result.
+     */
+    private fun resyncNowPlayingAfterAdBreak() {
+        if (!playerManager.player.playWhenReady) return
+        val trackAtFetch = currentTrack
+        serviceScope.launch {
+            nowPlayingRepository.fetchNowPlaying().fold(
+                onSuccess = { track ->
+                    // An ICY boundary applied a real track while we fetched — it is
+                    // sample-accurate, the schedule is not; keep it. (A -1 station fallback
+                    // applied by an empty frame does not outrank the fetch.)
+                    val sinceApplied = currentTrack
+                    if (sinceApplied !== trackAtFetch && sinceApplied != null && sinceApplied.eventId > 0) {
+                        return@fold
+                    }
+                    if (adUntilElapsedMs != null) return@fold
+                    Timber.tag("NowPlaying").d("post-ad resync eventId=%d", track.eventId)
+                    applyTrackMetadata(track)
+                },
+                onFailure = { e ->
+                    Timber.tag("NowPlaying").w("post-ad resync failed: %s", e.toString())
+                }
+            )
+        }
+    }
+
+    /**
+     * The audio side never resumes a stale buffer (a resume seeks the live edge); this is the
+     * display's counterpart. Left alone, the last song of a drive sits on the idle now-playing
+     * screen until the process dies — hours later it names a song a resume will not play.
+     * After [RetroFmConfig.TRACK_INFO_STALE_AFTER_MS] without playback the display reverts to
+     * station branding; cancelled the moment playback runs again.
+     */
+    private fun scheduleStaleInfoReset() {
+        staleInfoJob?.cancel()
+        staleInfoJob = serviceScope.launch {
+            delay(RetroFmConfig.TRACK_INFO_STALE_AFTER_MS)
+            // playWhenReady covers the connect/buffering window of a fresh play press.
+            if (playerManager.player.isPlaying || playerManager.player.playWhenReady) return@launch
+            Timber.tag("NowPlaying").d("track info stale — reverting to station branding")
             pendingAdTrack = null
-            applyTrackMetadata(pending)
+            applyTrackMetadata(NowPlayingRepository.stationFallback(-1L))
         }
     }
 
     private inner class PlaybackStateListener : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) {
+                staleInfoJob?.cancel()
                 startMetadataPolling()
             } else {
                 stopMetadataPolling()
@@ -361,6 +417,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
                 if (!playerManager.player.playWhenReady) {
                     clearAdState()
                 }
+                scheduleStaleInfoReset()
             }
         }
 

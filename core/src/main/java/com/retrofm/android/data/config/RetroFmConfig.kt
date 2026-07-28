@@ -87,6 +87,14 @@ object RetroFmConfig {
      */
     const val ICY_UPSTREAM_LEAD_MS = 0L
 
+    /**
+     * How long the last track's metadata may stay on an idle (not playing) session before the
+     * display reverts to station branding. Mirrors the audio-side rule that a resume never
+     * replays a stale buffer: when the user returns to the car after this long, the song on
+     * screen is not the song a resume will play, so showing it is misinformation.
+     */
+    const val TRACK_INFO_STALE_AFTER_MS = 5 * 60_000L
+
     /** Buffer required before playback starts — low so pressing play feels instant. */
     const val BUFFER_FOR_PLAYBACK_MS = 1_000
     /**
