@@ -1,5 +1,9 @@
 # Retro FM Android — Code Review & Improvement Report
 
+> **Historiskt dokument.** Granskningen avsåg den allra första implementationen (innan den
+> ens körts på enhet); samtliga P0–P2-punkter är sedan länge åtgärdade. Sparad som arbetslogg
+> — den beskriver **inte** dagens kodbas.
+
 **Date:** 2026-07-05
 **Reviewed by:** Claude (Fable 5), static review of the initial Kimi Code implementation + live verification of external endpoints.
 **Audience:** This report is written to be fed to an AI coding agent (Sonnet 5) as a work order. Each finding has a location, an explanation, and a concrete fix. Findings are ordered by priority. The app builds but has **not yet been run on a device** — P0 items below are expected to produce audible/user-visible failures on first real use.

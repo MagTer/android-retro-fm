@@ -72,3 +72,11 @@ The app ships logs to a remote sink; read them for car/phone debugging (the car 
 DEBUG level is set via `applogs.falle.se/admin` (Entra-gated) and **resets to WARN on every
 redeploy** of the log infra, so re-enable DEBUG before an investigation. The exact query recipe
 (SSH → VictoriaLogs) is in the maintainer's personal notes, not the repo.
+
+- The log client (`se.falle.logsink` in `:core`) is **vendored verbatim** from
+  `github.com/MagTer/logsink-clients` — never edit it only here. Change upstream first, then
+  re-vendor the files with the new commit hash in their 3-line header (the rest must stay
+  byte-identical to upstream).
+- The shim (`github.com/MagTer/logsink-shim`) **allowlists ingest fields server-side** — a new
+  per-line field the client sends also needs a shim allowlist entry, release and redeploy
+  before it reaches VictoriaLogs (it is silently stripped until then).

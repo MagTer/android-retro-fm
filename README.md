@@ -14,15 +14,21 @@ En dedikerad Android-app för att lyssna på Retro FM utan att gå via aggregera
 - Återansluter automatiskt vid nätverksavbrott.
 - Detekterar serverinjicerad reklam och tystar den, med "Reklam"-nedräkning i UI:t
   (kan stängas av via `RetroFmConfig.MUTE_ADS`).
+- Låtinfo drivs primärt av strömmens ICY-metadata (exakt vid låtbytet); nu-spelas-API:t
+  används för uppslag och som fallback.
+- Skickar fältloggar till en privat loggsink för felsökning i bil (produktionsbilar saknar
+  adb) — aldrig tokens, credential-URL:er eller PII (se `CLAUDE.md`).
 
 ## Teknikstack
 
-- Kotlin 2.2.10
-- Jetpack Compose 1.11.4 / Material 3
-- AndroidX Media3 1.10.1 (ExoPlayer + MediaSession)
-- Retrofit 2.12.0 + Kotlinx Serialization
-- Coil 3.5.0
+- Kotlin + Jetpack Compose (Material 3)
+- AndroidX Media3 (ExoPlayer + MediaSession + Cast)
+- Retrofit + Kotlinx Serialization
+- Coil
 - MVVM + Repository
+
+Exakta versioner ligger i modulernas `build.gradle.kts` — de uppdateras löpande och
+dokumenteras inte här.
 
 ## Bygga
 
@@ -71,16 +77,18 @@ via det dedikerade Automotive OS-spåret i Play Console.
 
 ## Signering och release (Google Play)
 
-Google Play kräver Android App Bundle (AAB). Bygg det med:
+Skarpa releaser går via GitHub Actions, inte manuella uppladdningar: bumpa `versionName` i
+både `app/` och `automotive/build.gradle.kts`, tagga `vX.Y.Z` (samma som versionName) och
+pusha taggen. Workflowen bygger, signerar och laddar upp båda bundlarna till Play internal
+testing (telefon → spåret `internal`, automotive → `automotive:internal`). `versionCode`
+härleds automatiskt från körningsnumret och ska aldrig bumpas för hand. Detaljer och
+fallgropar finns i `CLAUDE.md`.
 
-```bash
-./gradlew :app:bundleRelease
-```
-
-`:app` har en signaturkonfiguration (`signingConfigs.release`) som läser uppgifter från
-Gradle-properties — **inga hemligheter ligger i repot**. Utan properties byggs release-artefakten
-osignerad (användbart för R8-/bundle-verifiering). Lägg uppgifterna i `~/.gradle/gradle.properties`
-(utanför repot) eller skicka dem som `-P`-flaggor/miljövariabler:
+För lokala release-byggen: `:app`/`:automotive` har en signaturkonfiguration som läser
+uppgifter från Gradle-properties — **inga hemligheter ligger i repot**. Utan properties byggs
+release-artefakten osignerad (användbart för R8-/bundle-verifiering). Uppgifterna (befintlig
+upload-nyckel, förvarad utanför repot) läggs i `~/.gradle/gradle.properties` eller skickas
+som `-P`-flaggor:
 
 ```properties
 RETROFM_UPLOAD_STORE_FILE=/absolut/sokvag/till/upload-keystore.jks
@@ -89,18 +97,10 @@ RETROFM_UPLOAD_KEY_ALIAS=upload
 RETROFM_UPLOAD_KEY_PASSWORD=…
 ```
 
-Skapa upload-nyckeln själv (genereras aldrig av bygget) och förvara den utanför repot:
-
-```bash
-keytool -genkeypair -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 \
-    -validity 10000 -alias upload
-```
-
-Aktivera Play App Signing vid första uppladdningen (standard i Play Console).
-
 ## Konfiguration
 
-Alla ström-URL:er, API-endpoints och stationsidentitet ligger i `app/src/main/java/com/retrofm/android/data/config/RetroFmConfig.kt`.
+Alla ström-URL:er, API-endpoints, stationsidentitet och beteende-knappar (buffertar,
+reconnect-backoff, reklam-mute) ligger i `core/src/main/java/com/retrofm/android/data/config/RetroFmConfig.kt`.
 
 ## Projektstruktur
 
@@ -114,32 +114,15 @@ Projektet är uppdelat i tre Gradle-moduler:
   Samma `applicationId` som `:app` för att dela en enda Play Store-notering, men eget manifest utan
   launcher-activity, med `android.hardware.type.automotive` satt till `required="true"`.
 
+Paket på hög nivå (fil-för-fil-listor rostar — se källträdet för detaljer):
+
 ```
-core/src/main/java/com/retrofm/android
-├── data
-│   ├── api/RetroFmApi.kt
-│   ├── config/RetroFmConfig.kt
-│   ├── model/NowPlayingResponse.kt
-│   ├── model/TrackInfo.kt
-│   ├── repository/NowPlayingRepository.kt
-│   └── di/NetworkModule.kt
-└── playback
-    ├── RetroFmPlaybackService.kt
-    ├── MediaItemTree.kt
-    └── PlayerManager.kt
-
-app/src/main/java/com/retrofm/android
-├── ui
-│   ├── MainActivity.kt
-│   ├── PlayerScreen.kt
-│   └── PlayerViewModel.kt
-└── ui/theme
-    ├── Color.kt
-    ├── Theme.kt
-    └── Type.kt
-
-automotive/src/main
-└── AndroidManifest.xml   (ingen egen Kotlin-kod — allt kommer från :core)
+core/       com.retrofm.android.data      (api, config, model, repository, di)
+            com.retrofm.android.playback  (spelare/session, ICY/reklamdetektering,
+                                           albumkonst-ContentProvider, media-träd)
+            se.falle.logsink              (vendorerad loggklient — se CLAUDE.md)
+app/        com.retrofm.android.ui        (Compose-UI, ViewModel, tema)
+automotive/ enbart manifest + resurser    (all kod kommer från :core)
 ```
 
 ## Noteringar

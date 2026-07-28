@@ -56,7 +56,11 @@ GET https://listenapi.planetradio.co.uk/api9.2/nowplaying/res
 }
 ```
 
-**Uppdateringsstrategi:** Appen pollar detta API med ca 30 sekunders intervall under uppspelning. Bilder laddas asynkront.
+**Uppdateringsstrategi:** Ursprungligen pollades detta API var ~30 s under uppspelning.
+Sedan ICY-stödet är strömmen själv primärkällan: ICY-metadatan bär ett eventdata-id exakt
+vid låtbytet (se `IcyAdMarker` i `:core`), som slås upp mot samma API. Schemapollningen
+finns kvar som bootstrap/fallback tills första ICY-framen setts. Bilder laddas asynkront
+(i bilen via en `content://`-proxy — AAOS renderar inte fjärr-URI:er).
 
 ### 3. Spellista / nyligen spelat (valfri framtida funktion)
 Spellistesidan (`https://radioplay.se/retrofm/latlista`) har en motsvarande API-slutpunkt:
@@ -196,13 +200,17 @@ com.retrofm.android
 ---
 
 ## Definition av klart (första versionen)
-- [ ] Projekt skapat med Android Studio-kompatibel struktur.
-- [ ] Appen bygger utan fel.
-- [ ] Strömmen spelas på telefon.
-- [ ] Nu-spelas-data visas och uppdateras.
-- [ ] Medianotification och bakgrundsuppspelning fungerar.
-- [ ] Appen visas som mediekälla i Android Automotive-emulatorn.
-- [ ] Ingen manuell inmatning av ström-URL krävs av användaren.
+
+Samtliga punkter uppfylldes under juli 2026; appen är sedan dess i drift via Play internal
+testing på både telefon och riktig bil (Volvo AAOS). Kvar som historik:
+
+- [x] Projekt skapat med Android Studio-kompatibel struktur.
+- [x] Appen bygger utan fel.
+- [x] Strömmen spelas på telefon.
+- [x] Nu-spelas-data visas och uppdateras.
+- [x] Medianotification och bakgrundsuppspelning fungerar.
+- [x] Appen visas som mediekälla i Android Automotive-emulatorn.
+- [x] Ingen manuell inmatning av ström-URL krävs av användaren.
 
 ---
 

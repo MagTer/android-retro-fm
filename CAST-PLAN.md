@@ -1,5 +1,10 @@
 # Retro FM Android — Chromecast Support & Play Store Trial Plan
 
+> **Historiskt arbetsdokument.** Planen är genomförd: cast är utbyggt i `:app` och
+> Play-distributionen (internal testing via GitHub Actions) är live. Sparad för att
+> kodkommentarer refererar hit med §-nummer (t.ex. "CAST-PLAN §2.4"); den beskriver
+> **inte** nödvändigtvis dagens kodbas.
+
 **Date:** 2026-07-22
 **Goal:** Add Google Cast (Chromecast) support to the phone app (`:app`), then publish as a private (closed-testing) trial on Google Play. The `:automotive` module must remain cast-free and unaffected.
 **Written as a work order:** each step has a location and a concrete change. Execute phases in order; each phase ends in a buildable state.
