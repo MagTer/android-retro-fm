@@ -3,6 +3,7 @@ package com.retrofm.android
 import android.app.Application
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Build
 import androidx.core.content.pm.PackageInfoCompat
@@ -34,6 +35,15 @@ import timber.log.Timber
  */
 class RetroFmApplication : Application() {
 
+    /**
+     * The process-wide log shipper; null when no key is configured (local dev builds).
+     * Exposed so the playback service can flush at end-of-drive moments — on AAOS this app
+     * has no activity, so the ON_STOP hook below never fires there and the service's
+     * lifecycle is the only "we are about to go away" signal.
+     */
+    var logsinkClient: LogsinkClient? = null
+        private set
+
     override fun onCreate() {
         super.onCreate()
         Timber.plant(Timber.DebugTree())
@@ -46,6 +56,7 @@ class RetroFmApplication : Application() {
                 // Tells the phone's lines apart from the car's in the sink.
                 device = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
             )
+            logsinkClient = client
             Timber.plant(LogsinkTree(client))
 
             // Marks every process (re)start with the actually-installed version.
@@ -85,6 +96,27 @@ class RetroFmApplication : Application() {
                     }
                 }
             )
+            // Flush past the backoff the moment internet actually works. The car's modem
+            // validates minutes after process start; by then the client's exponential
+            // backoff (grown on the failed early flushes) could sleep through a short
+            // online window — the same failure mode the stream reconnect had before it
+            // was keyed to NET_CAPABILITY_VALIDATED. Never unregistered: process-lifetime.
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+                @Volatile
+                private var wasValidated = false
+                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                    val validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                    if (validated && !wasValidated) {
+                        ProcessLifecycleOwner.get().lifecycleScope.launch { client.flushNow() }
+                    }
+                    wasValidated = validated
+                }
+
+                override fun onLost(network: Network) {
+                    wasValidated = false
+                }
+            })
         }
     }
 }

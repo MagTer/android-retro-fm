@@ -16,9 +16,12 @@ import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
+import androidx.lifecycle.ProcessLifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionToken
 import com.google.common.collect.ImmutableList
+import com.retrofm.android.RetroFmApplication
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.retrofm.android.core.R
@@ -65,6 +68,10 @@ class RetroFmPlaybackService : MediaLibraryService() {
     // so it can't replace the "Reklam" label over muted audio, applied when the break lifts.
     private var pendingAdTrack: TrackInfo? = null
     private val nowPlayingRepository = NowPlayingRepository(NetworkModule.retroFmApi)
+
+    // On AAOS this app has no activity, so the Application's ON_STOP flush never fires in
+    // the car — playback stopping / service destruction are the only end-of-drive signals.
+    private val logsinkClient get() = (application as? RetroFmApplication)?.logsinkClient
 
     /**
      * True once ICY track metadata has arrived from the stream. From then on the display is
@@ -134,6 +141,11 @@ class RetroFmPlaybackService : MediaLibraryService() {
         serviceScope.cancel()
         mediaLibrarySession.release()
         playerManager.release()
+        // Last chance to ship the tail of the session before the process goes quiet.
+        // serviceScope is already cancelled, so ride the process-lifecycle scope.
+        logsinkClient?.let { client ->
+            ProcessLifecycleOwner.get().lifecycleScope.launch { client.flush() }
+        }
         super.onDestroy()
     }
 
@@ -418,6 +430,9 @@ class RetroFmPlaybackService : MediaLibraryService() {
                     clearAdState()
                 }
                 scheduleStaleInfoReset()
+                // Playback stopping is often the last event of a drive; ship what we have
+                // while the process is still alive instead of waiting out the flush interval.
+                logsinkClient?.let { client -> serviceScope.launch { client.flush() } }
             }
         }
 
