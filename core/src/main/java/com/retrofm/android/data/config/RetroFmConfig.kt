@@ -88,6 +88,18 @@ object RetroFmConfig {
     const val ICY_UPSTREAM_LEAD_MS = 0L
 
     /**
+     * Reject schedule-API answers (nowplaying polling, post-ad resync, the ad-break hold)
+     * whose eventFinish lies further in the past than this. Field-proven 2026-07-28: right
+     * after an ad break the nowplaying API still served an event finished 6.5 minutes
+     * earlier ("Beds Are Burning") while Michael Jackson was audibly playing — the API can
+     * lag whole songs around ad/talk blocks. The grace must stay ABOVE the typical stream
+     * delay behind broadcast (~60 s measured: preroll ads + rebuffer debt), because for a
+     * delayed listener an event that just finished on air may still be the audible truth.
+     * ICY-driven tracks are never subjected to this check — the stream is ground truth.
+     */
+    const val SCHEDULE_EVENT_STALE_AFTER_MS = 90_000L
+
+    /**
      * How long the last track's metadata may stay on an idle (not playing) session before the
      * display reverts to station branding. Mirrors the audio-side rule that a resume never
      * replays a stale buffer: when the user returns to the car after this long, the song on

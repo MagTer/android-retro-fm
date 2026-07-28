@@ -156,8 +156,16 @@ class RetroFmPlaybackService : MediaLibraryService() {
             while (isActive) {
                 val delayMs = nowPlayingRepository.fetchNowPlaying().fold(
                     onSuccess = { track ->
-                        applyTrackMetadata(track)
-                        nextPollDelayMs(track.finishTime)
+                        if (isStaleScheduleTrack(track)) {
+                            Timber.tag("NowPlaying").d(
+                                "poll result stale eventId=%d finish=%s — not applied",
+                                track.eventId, track.finishTime
+                            )
+                            RetroFmConfig.METADATA_POLL_MIN_INTERVAL_MS
+                        } else {
+                            applyTrackMetadata(track)
+                            nextPollDelayMs(track.finishTime)
+                        }
                     },
                     onFailure = { RetroFmConfig.METADATA_POLL_INTERVAL_MS }
                 )
@@ -179,6 +187,18 @@ class RetroFmPlaybackService : MediaLibraryService() {
             RetroFmConfig.METADATA_POLL_MIN_INTERVAL_MS,
             RetroFmConfig.METADATA_POLL_INTERVAL_MS
         )
+    }
+
+    /**
+     * True when a schedule-API answer describes an event that ended too long ago to be what
+     * anyone hears — the API can serve events whole songs stale around ad/talk blocks (see
+     * RetroFmConfig.SCHEDULE_EVENT_STALE_AFTER_MS for the field case). Applies ONLY to
+     * schedule-derived tracks (polling, ad-break hold, post-ad resync); ICY-driven tracks
+     * are the stream's own truth and are never rejected.
+     */
+    private fun isStaleScheduleTrack(track: TrackInfo): Boolean {
+        val finishMillis = track.finishTime?.let { parseEventTimeMillis(it) } ?: return false
+        return System.currentTimeMillis() - finishMillis > RetroFmConfig.SCHEDULE_EVENT_STALE_AFTER_MS
     }
 
     private fun parseEventTimeMillis(value: String): Long? = try {
@@ -358,8 +378,17 @@ class RetroFmPlaybackService : MediaLibraryService() {
         // the break) applies its own track right after, deduped if identical.
         val pending = pendingAdTrack
         pendingAdTrack = null
+        // Re-check staleness at application time — the hold can span a long break, and the
+        // API answer may already have been stale when it was held (field case 2026-07-28).
+        val freshPending = pending?.takeUnless { isStaleScheduleTrack(it) }
+        if (pending != null && freshPending == null) {
+            Timber.tag("NowPlaying").d(
+                "held track stale eventId=%d finish=%s — dropped",
+                pending.eventId, pending.finishTime
+            )
+        }
         when {
-            pending != null -> applyTrackMetadata(pending)
+            freshPending != null -> applyTrackMetadata(freshPending)
             resyncNowPlaying -> resyncNowPlayingAfterAdBreak()
         }
     }
@@ -386,6 +415,16 @@ class RetroFmPlaybackService : MediaLibraryService() {
                         return@fold
                     }
                     if (adUntilElapsedMs != null) return@fold
+                    if (isStaleScheduleTrack(track)) {
+                        // The API is lagging whole songs — a wrong title is worse than the
+                        // logo. Station branding until the next ICY boundary corrects it.
+                        Timber.tag("NowPlaying").d(
+                            "post-ad resync stale eventId=%d finish=%s — station branding",
+                            track.eventId, track.finishTime
+                        )
+                        applyTrackMetadata(NowPlayingRepository.stationFallback(-1L))
+                        return@fold
+                    }
                     Timber.tag("NowPlaying").d("post-ad resync eventId=%d", track.eventId)
                     applyTrackMetadata(track)
                 },
