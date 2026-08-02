@@ -59,6 +59,14 @@ object RetroFmConfig {
     const val AD_MUTE_TAIL_MS = 2_000L
 
     /**
+     * Ramp the volume back up over this long when an ad-break mute lifts, instead of a hard
+     * cut from silence to full level. Quadratic curve: linear gain sounds like everything
+     * happens in the last third; fraction² spreads the perceived rise across the second.
+     */
+    const val AD_UNMUTE_FADE_MS = 1_000L
+    const val AD_UNMUTE_FADE_STEP_MS = 50L
+
+    /**
      * Now-playing branding during a muted ad break. Goes into the media metadata itself so
      * every surface (car UI, notification, phone screen) stops claiming an artist is playing
      * while the audio is muted — field-tested confusion: raise the volume on a "song", get
@@ -114,8 +122,29 @@ object RetroFmConfig {
      * display reverts to station branding. Mirrors the audio-side rule that a resume never
      * replays a stale buffer: when the user returns to the car after this long, the song on
      * screen is not the song a resume will play, so showing it is misinformation.
+     *
+     * Enforced twice, because the idle timer alone cannot be trusted in the car: coroutine
+     * delay() counts on the uptime clock, which stands still while the car suspends to RAM
+     * (and a frozen cached process runs nothing at all) — so a 15 min parking never advances
+     * the 5 min timer. A wall-clock heartbeat (PLAYBACK_HEARTBEAT_MS) therefore records the
+     * last time playback was demonstrably alive, and the same threshold is re-checked against
+     * wall clock when playback resumes (see maybeHandleIdleGap).
      */
     const val TRACK_INFO_STALE_AFTER_MS = 5 * 60_000L
+
+    /** Cadence of the wall-clock alive stamp while audio is playing (see above). */
+    const val PLAYBACK_HEARTBEAT_MS = 30_000L
+
+    /**
+     * Constant attenuation of the local player, aligning the stream's loudness with what
+     * normalized services play at (Spotify et al. normalize to −14 LUFS; the user matched
+     * volume-knob positions against Spotify on the car). The stream carries full FM broadcast
+     * processing — measured 2026-08-02 over 3 min with ffmpeg ebur128: integrated −5.2 LUFS,
+     * LRA 1.1 LU — so −8.8 dB lands it at −14: 10^(−8.8/20) ≈ 0.36. Applied to the local
+     * ExoPlayer only (a Cast receiver keeps its own level); lossless, since ExoPlayer scales
+     * in the float pipeline. Re-measure before changing: the station can retune its processing.
+     */
+    const val PLAYER_BASE_GAIN = 0.36f
 
     /** Buffer required before playback starts — low so pressing play feels instant. */
     const val BUFFER_FOR_PLAYBACK_MS = 1_000

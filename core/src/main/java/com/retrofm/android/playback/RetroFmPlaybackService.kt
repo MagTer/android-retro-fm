@@ -64,6 +64,14 @@ class RetroFmPlaybackService : MediaLibraryService() {
     private var adCountdownJob: Job? = null
     private var staleInfoJob: Job? = null
     private var preAdVolume: Float? = null
+    private var volumeFadeJob: Job? = null
+    private var playbackHeartbeatJob: Job? = null
+    // Wall-clock stamp of the last moment playback was demonstrably alive. Wall clock on
+    // purpose: it is the only clock that keeps running while the car suspends to RAM — the
+    // uptime clock (and every coroutine delay with it) freezes, and a frozen process runs
+    // nothing. Compared against on resume to catch "parked 15 min, everything on screen is
+    // from the previous drive".
+    private var lastAliveWallMs: Long? = null
     // A real track title that arrived (via polling) while an ad break was active — held back
     // so it can't replace the "Reklam" label over muted audio, applied when the break lifts.
     private var pendingAdTrack: TrackInfo? = null
@@ -77,6 +85,11 @@ class RetroFmPlaybackService : MediaLibraryService() {
      * True once ICY track metadata has arrived from the stream. From then on the display is
      * driven by the stream itself (sample-accurate) and the schedule-based nowplaying polling
      * — which runs ahead of what is audible by the buffering delay — stays off.
+     *
+     * Un-latched by [maybeHandleIdleGap] after a long playback gap: the process survives
+     * parking (the car keeps it in RAM), and a fresh connect's first ICY frame can be an
+     * unidentified eventdata/-1 (talk, jingle, ad block) that will never correct the display.
+     * Polling must be allowed back on until the stream proves it is announcing tracks again.
      */
     private var icyDriven = false
 
@@ -357,24 +370,36 @@ class RetroFmPlaybackService : MediaLibraryService() {
         // the ad subtitle down to the unmute moment via one-per-second metadata updates.
         startAdCountdown(untilElapsedMs)
         if (RetroFmConfig.MUTE_ADS) {
+            // A marker can land mid-fade (the unmute ramp after the previous break): stop the
+            // ramp before touching the volume so it can't raise it again underneath us.
+            volumeFadeJob?.cancel()
+            volumeFadeJob = null
             // Back-to-back ads re-announce themselves: only capture the volume on the first,
-            // so a mid-break marker can't overwrite the saved level with our own 0.
+            // so a mid-break marker can't overwrite the saved level with our own 0. A running
+            // fade still owns preAdVolume (cleared only on ramp completion), so a mid-fade
+            // marker keeps the true pre-break level rather than capturing a half-raised one.
             if (preAdVolume == null) {
                 preAdVolume = playerManager.player.volume
-                playerManager.player.volume = 0f
             }
+            playerManager.player.volume = 0f
             adUnmuteJob?.cancel()
             adUnmuteJob = serviceScope.launch {
                 delay(untilElapsedMs - SystemClock.elapsedRealtime())
                 // Fallback unmute at the announced deadline; usually the ad-end metadata
                 // (clearAdState via onMetadata) lands first or shortly after. This path has
                 // no ICY frame carrying the on-air track, so ask for a now-playing resync.
-                clearAdState(resyncNowPlaying = true)
+                clearAdState(resyncNowPlaying = true, fade = true)
             }
         }
     }
 
-    private fun clearAdState(resyncNowPlaying: Boolean = false) {
+    /**
+     * @param fade Ramp the volume back up over [RetroFmConfig.AD_UNMUTE_FADE_MS] instead of a
+     *   hard cut. Only for the paths where music is audibly continuing (ICY ad-end, mute
+     *   deadline); a pause, cast transfer, or idle-gap reset restores instantly — there is
+     *   nothing to ease into.
+     */
+    private fun clearAdState(resyncNowPlaying: Boolean = false, fade: Boolean = false) {
         if (adUntilElapsedMs == null) return
         Timber.tag("NowPlaying").d("ad break cleared")
         adUntilElapsedMs = null
@@ -382,8 +407,16 @@ class RetroFmPlaybackService : MediaLibraryService() {
         adUnmuteJob = null
         adCountdownJob?.cancel()
         adCountdownJob = null
-        preAdVolume?.let { playerManager.player.volume = it }
-        preAdVolume = null
+        volumeFadeJob?.cancel()
+        volumeFadeJob = null
+        preAdVolume?.let { target ->
+            if (fade) {
+                startUnmuteFade(target)
+            } else {
+                playerManager.player.volume = target
+                preAdVolume = null
+            }
+        }
         mediaLibrarySession.setSessionExtras(Bundle())
         // Restore the real track the moment the break lifts. adUntilElapsedMs is already null,
         // so this apply is no longer suppressed; an ICY ad-end frame (if that is what cleared
@@ -402,6 +435,28 @@ class RetroFmPlaybackService : MediaLibraryService() {
         when {
             freshPending != null -> applyTrackMetadata(freshPending)
             resyncNowPlaying -> resyncNowPlayingAfterAdBreak()
+        }
+    }
+
+    /**
+     * Eases the post-ad unmute from 0 up to [target] over [RetroFmConfig.AD_UNMUTE_FADE_MS].
+     * fraction² keeps the rise perceptually even (linear gain bunches it into the last third).
+     * Owns [preAdVolume] until the ramp completes: a new ad marker mid-ramp cancels this job
+     * and re-mutes, and must find the true pre-break level still captured, not a half-raised
+     * value (see setAdState).
+     */
+    private fun startUnmuteFade(target: Float) {
+        volumeFadeJob?.cancel()
+        volumeFadeJob = serviceScope.launch {
+            val steps = (RetroFmConfig.AD_UNMUTE_FADE_MS / RetroFmConfig.AD_UNMUTE_FADE_STEP_MS)
+                .toInt().coerceAtLeast(1)
+            for (step in 1..steps) {
+                val fraction = step.toFloat() / steps
+                playerManager.player.volume = target * fraction * fraction
+                delay(RetroFmConfig.AD_UNMUTE_FADE_STEP_MS)
+            }
+            playerManager.player.volume = target
+            preAdVolume = null
         }
     }
 
@@ -466,12 +521,63 @@ class RetroFmPlaybackService : MediaLibraryService() {
         }
     }
 
+    /**
+     * The wall-clock counterpart of [scheduleStaleInfoReset], for the car: parked, the whole
+     * system suspends — the uptime clock (and the 5 min delay with it) freezes, so the idle
+     * timer never fires and the previous drive's song greets the next one. Called whenever
+     * playback is (about to be) running again; if the last alive stamp is older than
+     * [RetroFmConfig.TRACK_INFO_STALE_AFTER_MS], everything display-related from before the
+     * gap is stale: drop it to station branding, un-latch [icyDriven] so polling resumes
+     * (a fresh connect's first ICY frame may be an unidentified -1 that would otherwise
+     * "keep" the stale song — see onIcyTrackMetadata), and let polling / the next ICY
+     * boundary fill in the real track within seconds.
+     */
+    private fun maybeHandleIdleGap() {
+        val last = lastAliveWallMs ?: return
+        val gapMs = System.currentTimeMillis() - last
+        if (gapMs < RetroFmConfig.TRACK_INFO_STALE_AFTER_MS) return
+        lastAliveWallMs = null // one-shot per gap; re-stamped by the heartbeat
+        Timber.tag("NowPlaying").i("idle gap %d s — resetting stale display state", gapMs / 1000)
+        pendingAdTrack = null
+        clearAdState()
+        icyDriven = false
+        lastAppliedEventId = null
+        applyTrackMetadata(NowPlayingRepository.stationFallback(-1L))
+    }
+
+    private fun startPlaybackHeartbeat() {
+        if (playbackHeartbeatJob?.isActive == true) return
+        playbackHeartbeatJob = serviceScope.launch {
+            while (isActive) {
+                lastAliveWallMs = System.currentTimeMillis()
+                delay(RetroFmConfig.PLAYBACK_HEARTBEAT_MS)
+            }
+        }
+    }
+
+    private fun stopPlaybackHeartbeat() {
+        playbackHeartbeatJob?.cancel()
+        playbackHeartbeatJob = null
+        lastAliveWallMs = System.currentTimeMillis()
+    }
+
     private inner class PlaybackStateListener : Player.Listener {
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            // Fires at the play press itself, seconds before audio starts — the earliest
+            // moment to swap a previous drive's song off the screen.
+            if (playWhenReady) maybeHandleIdleGap()
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) {
                 staleInfoJob?.cancel()
+                // Also here, not only at the play press: after a suspend mid-playback the car
+                // resumes with playWhenReady still true, so onPlayWhenReadyChanged never fires.
+                maybeHandleIdleGap()
+                startPlaybackHeartbeat()
                 startMetadataPolling()
             } else {
+                stopPlaybackHeartbeat()
                 stopMetadataPolling()
                 // isPlaying also drops during a mid-ad REBUFFER (playWhenReady still true) —
                 // clearing then unmuted the tail of the ad after every stall, which made ad
@@ -529,7 +635,9 @@ class RetroFmPlaybackService : MediaLibraryService() {
                         SystemClock.elapsedRealtime() + durationMs + RetroFmConfig.AD_MUTE_TAIL_MS
                     )
                 } else {
-                    clearAdState()
+                    // Regular metadata doubles as the ad-end signal — music is audibly
+                    // resuming, so ease the volume back instead of a hard cut.
+                    clearAdState(fade = true)
                     onIcyTrackMetadata(icy)
                 }
             }

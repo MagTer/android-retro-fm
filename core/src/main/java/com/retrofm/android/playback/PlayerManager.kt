@@ -187,6 +187,10 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
     }
 
     init {
+        // Loudness alignment with normalized services — on the local player only, so a Cast
+        // receiver's level is untouched. The ad-mute logic captures/restores player.volume
+        // generically, so this baseline flows through it unchanged.
+        exoPlayer.volume = RetroFmConfig.PLAYER_BASE_GAIN
         connectivityManager.registerDefaultNetworkCallback(networkCallback)
         logNetworkSnapshot()
     }
