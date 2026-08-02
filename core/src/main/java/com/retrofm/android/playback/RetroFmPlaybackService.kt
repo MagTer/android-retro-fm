@@ -215,11 +215,15 @@ class RetroFmPlaybackService : MediaLibraryService() {
     }
 
     /**
-     * True when a schedule-API answer describes an event that ended too long ago to be what
-     * anyone hears — the API can serve events whole songs stale around ad/talk blocks (see
-     * RetroFmConfig.SCHEDULE_EVENT_STALE_AFTER_MS for the field case). Applies ONLY to
-     * schedule-derived tracks (polling, ad-break hold, post-ad resync); ICY-driven tracks
-     * are the stream's own truth and are never rejected.
+     * True when a track's timestamps describe an event that ended too long ago to be what
+     * anyone hears — the schedule API can serve events whole songs stale around ad/talk
+     * blocks (see RetroFmConfig.SCHEDULE_EVENT_STALE_AFTER_MS for the field case). Checked
+     * for schedule-derived tracks (polling, ad-break hold, post-ad resync) AND for
+     * eventdata-resolved ICY tracks: the stream was assumed to be its own ground truth, but
+     * the station's ICY injection can freeze — field case 2026-08-02, the stream announced
+     * the same song for two days straight while the nowplaying API sat empty. A track whose
+     * own eventdata finished ages ago is provably not what is on air, whoever announced it.
+     * Tracks without a finish timestamp (StreamTitle fallback, station branding) pass.
      */
     private fun isStaleScheduleTrack(track: TrackInfo): Boolean {
         val finishMillis = track.finishTime?.let { parseEventTimeMillis(it) } ?: return false
@@ -695,6 +699,21 @@ class RetroFmPlaybackService : MediaLibraryService() {
                     return@launch
                 }
                 NowPlayingRepository.stationFallback(eventId ?: -1L)
+            }
+            if (isStaleScheduleTrack(track)) {
+                // The stream's own announcement resolves to an event that finished long ago:
+                // the station's ICY injection is frozen (2026-08-02 — stuck on one song since
+                // two days, nowplaying API empty). A provably stale "ground truth" is no
+                // ground truth: station branding, and hand the display back to polling so a
+                // server-side recovery is picked up without waiting for the next boundary.
+                Timber.tag("NowPlaying").w(
+                    "icy track stale eventId=%d finish=%s — station branding, polling back on",
+                    track.eventId, track.finishTime
+                )
+                icyDriven = false
+                startMetadataPolling()
+                applyTrackMetadata(NowPlayingRepository.stationFallback(-1L))
+                return@launch
             }
             // Fetch first, then hold: compensates the station-side metadata lead (see
             // RetroFmConfig.ICY_UPSTREAM_LEAD_MS). Launch order on the Main dispatcher
