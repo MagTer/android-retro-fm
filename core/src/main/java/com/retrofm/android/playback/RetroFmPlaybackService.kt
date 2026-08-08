@@ -32,11 +32,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 
 class RetroFmPlaybackService : MediaLibraryService() {
@@ -546,39 +547,37 @@ class RetroFmPlaybackService : MediaLibraryService() {
             applyTrackMetadata(TrackInfo.stationFallback())
             return
         }
-        serviceScope.launch {
+        // One lookup in flight at a time: a new boundary cancels the previous one, so a slow
+        // response for a song that has already ended can't overwrite its successor.
+        artworkJob?.cancel()
+        artworkJob = serviceScope.launch {
             // Hold before applying: compensates the station-side metadata lead (see
             // RetroFmConfig.ICY_UPSTREAM_LEAD_MS, currently 0). Launch order on the Main
             // dispatcher preserves boundary order for back-to-back events.
             delay(RetroFmConfig.ICY_UPSTREAM_LEAD_MS)
-            applyTrackMetadata(track)
-            fetchArtworkFor(track)
-        }
-    }
 
-    /**
-     * Second pass for the same track, carrying real album art. The stream gives us only text, so
-     * the cover has to be looked up over the network (see [ArtworkLookup]) — the title is applied
-     * first and unblocked, and the artwork upgrades it a moment later.
-     *
-     * Only one lookup is ever in flight: a new boundary cancels the previous one, so a slow
-     * response for a song that has already ended can't overwrite its successor.
-     */
-    private fun fetchArtworkFor(track: TrackInfo) {
-        artworkJob?.cancel()
-        artworkJob = serviceScope.launch {
-            val url = withContext(Dispatchers.IO) {
+            // Resolve the cover BEFORE publishing, so each track updates the surfaces exactly
+            // once. Applying the title first and the art second made the car flash the station
+            // logo on every song (field-tested 2026-08-08).
+            val lookup = async(Dispatchers.IO) {
                 ArtworkLookup.artworkUrl(track.artist, track.title)
-            } ?: return@launch
-            // The boundary may have moved on while the lookup ran (or an ad break started and
-            // is holding this track). Apply only if it is still the track in question.
+            }
+            val url = withTimeoutOrNull(RetroFmConfig.ARTWORK_FIRST_APPLY_BUDGET_MS) { lookup.await() }
+            applyTrackMetadata(url?.let { track.copy(imageUrl = it) } ?: track)
+            if (url != null) return@launch
+
+            // Budget blown: the title is already out with the logo. Let the lookup finish and
+            // upgrade the cover if this is still the track being played (or the one held back
+            // by an ad break). Rare — cache hits and normal responses land inside the budget.
+            val late = runCatching { lookup.await() }.getOrNull() ?: return@launch
             val stillRelevant = currentTrack?.eventId == track.eventId ||
                 pendingAdTrack?.eventId == track.eventId
             if (!stillRelevant) {
-                Timber.tag("Artwork").d("artwork discarded — track moved on")
+                Timber.tag("Artwork").d("late artwork discarded — track moved on")
                 return@launch
             }
-            applyTrackMetadata(track.copy(imageUrl = url))
+            Timber.tag("Artwork").d("late artwork applied for eventId=%d", track.eventId)
+            applyTrackMetadata(track.copy(imageUrl = late))
         }
     }
 

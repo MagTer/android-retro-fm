@@ -48,6 +48,18 @@ object RetroFmConfig {
     /** Hard ceiling on an artwork lookup — art is a nicety, it must never hold up the display. */
     const val ARTWORK_LOOKUP_TIMEOUT_MS = 5_000L
 
+    /**
+     * How long a track boundary waits for its cover before publishing metadata anyway.
+     *
+     * The surfaces are updated ONCE per track, with the art already in hand, because updating
+     * twice is visibly wrong in the car: 1.0.41 applied the title with the station logo and
+     * swapped in the cover a moment later, which read as the logo flashing up and then breaking
+     * (field-tested 2026-08-08). Cache hits resolve instantly, so this budget only bites on the
+     * first play of a song. If it is exceeded the title goes out with the logo and the cover
+     * upgrades whenever it lands — a rare, late single swap rather than one on every song.
+     */
+    const val ARTWORK_FIRST_APPLY_BUDGET_MS = 1_500L
+
     /** Entries kept in the in-memory artwork cache; a drive rarely revisits more than a few. */
     const val ARTWORK_CACHE_ENTRIES = 100
 

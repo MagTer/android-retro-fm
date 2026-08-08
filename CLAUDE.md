@@ -157,6 +157,16 @@ public keyless `itunes.apple.com/search` (resolved every track tested, including
 one request per boundary at most, hits *and* misses cached for the process lifetime. The
 `artworkUrl100` the API returns is upsized by swapping the rendition segment to `600x600bb`.
 
+**`AlbumArtContentProvider.ALLOWED_HOSTS` must list the artwork host.** 1.0.41 shipped without
+`mzstatic.com` on it, so `openFile` blocked every cover and returned null — the car rendered its
+own two-circle placeholder and the logs showed no artwork activity at all. A new artwork source
+is two changes, not one: the lookup *and* the allowlist (`AlbumArtHostAllowlistTest` guards it).
+
+**Update each track's metadata exactly once.** 1.0.41 applied the title with the station logo and
+swapped the cover in afterwards; in the car that read as the logo flashing up and then breaking.
+The cover is now resolved *before* the first apply, bounded by
+`ARTWORK_FIRST_APPLY_BUDGET_MS` (1.5 s) so a slow lookup can't hold the title hostage.
+
 Two consequences worth knowing before touching this:
 - The title is applied first and the artwork upgrades it in a second apply. That only works
   because dedup compares the **whole** `TrackInfo`, not `eventId` — comparing ids would swallow

@@ -33,7 +33,21 @@ class AlbumArtContentProvider : ContentProvider() {
 
     companion object {
         const val AUTHORITY = "com.magter.retrofm.artwork"
-        private val ALLOWED_HOSTS = setOf("media.bauerradio.com", "assets.planetradio.co.uk")
+        /**
+         * Hosts this proxy will fetch. Not decoration — a crafted content:// URI would
+         * otherwise turn the provider into an open proxy.
+         *
+         * `mzstatic.com` is Apple's artwork CDN, which serves the covers ArtworkLookup
+         * resolves; it is spread over `is1-ssl`…`is5-ssl` subdomains, hence the suffix match
+         * below. Forgetting it in 1.0.41 was the whole "car shows a placeholder with two
+         * circles" bug: openFile blocked every cover and returned null. **Any new artwork
+         * source needs its host added here or it silently renders nothing.**
+         */
+        private val ALLOWED_HOSTS = setOf(
+            "media.bauerradio.com",
+            "assets.planetradio.co.uk",
+            "mzstatic.com"
+        )
         private const val B64 = Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
 
         /** Maps a remote art URI to a content:// URI this provider serves. Context-free. */
