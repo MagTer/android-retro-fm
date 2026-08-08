@@ -273,6 +273,21 @@ redeploy** of the log infra, so re-enable DEBUG before an investigation. The exa
   `github.com/MagTer/logsink-clients` — never edit it only here. Change upstream first, then
   re-vendor the files with the new commit hash in their 3-line header (the rest must stay
   byte-identical to upstream).
+- **Durable spool** (client `spoolFile`, wired in `RetroFmApplication`, knobs and kill switch
+  `RetroFmConfig.LOG_SPOOL_*`). The car's modem drops repeatedly mid-drive; the in-memory buffer
+  survives that, but not the process being killed at park while still offline — which is why a
+  drive's tail never reached the sink. The spool closes only that gap.
+  - It is a last resort, not a mirror: **nothing touches disk on the logging path**, and a
+    normal online drive writes nothing at all. Disk is touched only after a flush has actually
+    failed (≥2 min apart, skipped when nothing new was logged) and at teardown via
+    `persistNow()`. Budget: ~15 writes of ≤64 KB per half-hour with no coverage.
+  - A first attempt (`DiskLogTree`, 1.0.28) **took logging down completely** — one line per boot,
+    then silence, worse each restart. It appended every line synchronously on the logging thread
+    and replayed an ever-growing backlog on the main thread inside `Application.onCreate`, so
+    the car ANR'd at boot and was killed before it could ship anything. Do not reintroduce
+    per-line I/O, main-thread replay, or an uncapped file.
+  - If that signature ever returns, flip `LOG_SPOOL_ENABLED` to false and ship — that is what
+    it is for.
 - The shim (`github.com/MagTer/logsink-shim`) **allowlists ingest fields server-side** — a new
   per-line field the client sends also needs a shim allowlist entry, release and redeploy
   before it reaches VictoriaLogs (it is silently stripped until then).

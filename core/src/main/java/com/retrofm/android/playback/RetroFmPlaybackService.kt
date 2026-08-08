@@ -140,7 +140,12 @@ class RetroFmPlaybackService : MediaLibraryService() {
         // Last chance to ship the tail of the session before the process goes quiet.
         // serviceScope is already cancelled, so ride the process-lifecycle scope.
         logsinkClient?.let { client ->
-            ProcessLifecycleOwner.get().lifecycleScope.launch { client.flush() }
+            ProcessLifecycleOwner.get().lifecycleScope.launch {
+                client.flush()
+                // Service teardown is the car's end-of-drive signal; persist whatever the
+                // flush could not ship so a park without coverage is not a blind spot.
+                client.persistNow()
+            }
         }
         super.onDestroy()
     }
@@ -446,7 +451,12 @@ class RetroFmPlaybackService : MediaLibraryService() {
                 scheduleStaleInfoReset()
                 // Playback stopping is often the last event of a drive; ship what we have
                 // while the process is still alive instead of waiting out the flush interval.
-                logsinkClient?.let { client -> serviceScope.launch { client.flush() } }
+                logsinkClient?.let { client ->
+                    serviceScope.launch {
+                        client.flush()
+                        client.persistNow()
+                    }
+                }
             }
         }
 

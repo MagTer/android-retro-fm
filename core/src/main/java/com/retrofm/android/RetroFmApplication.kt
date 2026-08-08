@@ -13,6 +13,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.retrofm.android.core.BuildConfig
 import com.retrofm.android.data.config.RetroFmConfig
+import java.io.File
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -28,10 +29,14 @@ import timber.log.Timber
  * Log hygiene is part of the wire contract: once lines leave the device — no tokens, no URLs
  * with credentials, no PII.
  *
- * NOTE: an experimental disk-spool mirror (DiskLogTree, added 1.0.28) was reverted here — it
- * correlated with the car shipping only a single line per boot and then going silent, and it
- * never actually helped (the car couldn't reach the sink regardless). Back to the plain,
- * known-good pipeline.
+ * Durable spool: a first attempt (DiskLogTree, 1.0.28) was reverted — it mirrored every line to
+ * disk synchronously on the logging thread and replayed a growing backlog on the main thread in
+ * onCreate, and the car went from full logs to one line per boot and then silence. The spool
+ * used here is a different animal, and lives in the vendored client rather than in a Timber
+ * tree: nothing touches disk on the logging path, writes happen only after a flush has already
+ * failed (rate-limited, size-capped), replay runs off the main thread with the file deleted
+ * first, and any I/O failure disables the spool instead of retrying. Kill switch:
+ * [RetroFmConfig.LOG_SPOOL_ENABLED].
  */
 class RetroFmApplication : Application() {
 
@@ -54,10 +59,24 @@ class RetroFmApplication : Application() {
                 ingestUrl = RetroFmConfig.LOGSINK_INGEST_URL,
                 apiKey = key,
                 // Tells the phone's lines apart from the car's in the sink.
-                device = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
+                device = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
+                // Survives the car being parked while offline — see RetroFmConfig for the
+                // write budget and the kill switch. Null disables it entirely in the client.
+                spoolFile = if (RetroFmConfig.LOG_SPOOL_ENABLED) {
+                    File(filesDir, RetroFmConfig.LOG_SPOOL_FILE_NAME)
+                } else {
+                    null
+                },
+                spoolMaxBytes = RetroFmConfig.LOG_SPOOL_MAX_BYTES,
+                spoolMinWriteIntervalMs = RetroFmConfig.LOG_SPOOL_MIN_WRITE_INTERVAL_MS,
+                spoolMaxReplayLines = RetroFmConfig.LOG_SPOOL_MAX_REPLAY_LINES
             )
             logsinkClient = client
             Timber.plant(LogsinkTree(client))
+
+            // Restore a previous process's unshipped lines. Off the main thread on purpose:
+            // the previous spool attempt did this work inside onCreate and ANR'd the boot.
+            ProcessLifecycleOwner.get().lifecycleScope.launch { client.replaySpool() }
 
             // Marks every process (re)start with the actually-installed version.
             runCatching {
@@ -84,7 +103,12 @@ class RetroFmApplication : Application() {
             Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
                 runCatching {
                     Timber.tag("Crash").e(throwable, "uncaught on thread %s", thread.name)
-                    runBlocking { withTimeout(2_000L) { client.flush() } }
+                    runBlocking {
+                        withTimeout(2_000L) { client.flush() }
+                        // Whatever the network refused now lives on disk instead of dying
+                        // with the process — a crash offline was previously invisible.
+                        withTimeout(1_000L) { client.persistNow() }
+                    }
                 }
                 platformHandler?.uncaughtException(thread, throwable)
             }
@@ -92,7 +116,10 @@ class RetroFmApplication : Application() {
             ProcessLifecycleOwner.get().lifecycle.addObserver(
                 LifecycleEventObserver { _, event ->
                     if (event == Lifecycle.Event.ON_STOP) {
-                        ProcessLifecycleOwner.get().lifecycleScope.launch { client.flush() }
+                        ProcessLifecycleOwner.get().lifecycleScope.launch {
+                            client.flush()
+                            client.persistNow()
+                        }
                     }
                 }
             )

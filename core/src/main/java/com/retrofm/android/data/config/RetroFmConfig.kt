@@ -32,6 +32,30 @@ object RetroFmConfig {
     const val LOGSINK_INGEST_URL = "https://applogs.falle.se/ingest"
 
     /**
+     * Durable log spool (LogsinkClient's opt-in `spoolFile`). The car's modem drops repeatedly
+     * mid-drive — field logs show "network lost" several times a day — and the in-memory buffer
+     * dies with the process when the car is parked while offline, which is exactly why a drive's
+     * tail never reaches the sink.
+     *
+     * Kill switch: set false and ship. An earlier consumer-side spool took logging down
+     * completely (see the client's KDoc), so this must stay trivially revocable without code
+     * surgery. If the sink ever shows one line per boot and then silence, flip this first.
+     */
+    const val LOG_SPOOL_ENABLED = true
+
+    const val LOG_SPOOL_FILE_NAME = "logsink-spool.ndjson"
+
+    /**
+     * Deliberately conservative for the car: the head unit's SSD is expensive to replace and
+     * the hardware is slow. With these numbers a normal online drive writes **nothing**, and a
+     * 30 min stretch entirely without coverage costs at most ~15 writes of ≤64 KB — under 1 MB.
+     * Even a pessimistic 2 MB/day is well under a gigabyte a year.
+     */
+    const val LOG_SPOOL_MAX_BYTES = 64 * 1024
+    const val LOG_SPOOL_MIN_WRITE_INTERVAL_MS = 120_000L
+    const val LOG_SPOOL_MAX_REPLAY_LINES = 500
+
+    /**
      * Per-track album art (see ArtworkLookup). The station's Icecast carries no artwork, so
      * covers are resolved by "artist title" against the public, keyless iTunes Search API —
      * at most one request per track boundary, with hits and misses cached.
