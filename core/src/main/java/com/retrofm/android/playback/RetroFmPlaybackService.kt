@@ -25,6 +25,7 @@ import com.retrofm.android.RetroFmApplication
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.retrofm.android.core.R
+import com.retrofm.android.data.api.ArtworkLookup
 import com.retrofm.android.data.config.RetroFmConfig
 import com.retrofm.android.data.model.TrackInfo
 import kotlinx.coroutines.CoroutineScope
@@ -35,6 +36,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 class RetroFmPlaybackService : MediaLibraryService() {
@@ -50,7 +52,8 @@ class RetroFmPlaybackService : MediaLibraryService() {
     private lateinit var playerManager: PlayerManager
     private lateinit var mediaLibrarySession: MediaLibrarySession
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var lastAppliedEventId: Long? = null
+    private var lastAppliedTrack: TrackInfo? = null
+    private var artworkJob: Job? = null
     private var currentTrack: TrackInfo? = null
     private var adUntilElapsedMs: Long? = null
     private var adUnmuteJob: Job? = null
@@ -152,7 +155,10 @@ class RetroFmPlaybackService : MediaLibraryService() {
             Timber.tag("NowPlaying").d("apply held during ad break eventId=%d", track.eventId)
             return
         }
-        if (track.eventId == lastAppliedEventId) {
+        // Dedup on the whole track, not just its id: album art arrives a moment after the title
+        // (ArtworkLookup is a network round-trip), and that second apply differs only in
+        // imageUrl. Comparing ids would swallow it and leave the station logo on screen.
+        if (track == lastAppliedTrack) {
             Timber.tag("NowPlaying").d("apply skipped (dedup) eventId=%d", track.eventId)
             return
         }
@@ -160,14 +166,14 @@ class RetroFmPlaybackService : MediaLibraryService() {
         // CAST-PLAN §2.4 (WP2): while casting, replaceMediaItem can translate to a queue
         // reload on the receiver, producing an audible gap on every track change. Skip the
         // in-place update on the remote route and accept static "Retro FM" branding on the
-        // receiver (and phone UI) for v1. lastAppliedEventId is left untouched so the current
+        // receiver (and phone UI) for v1. lastAppliedTrack is left untouched so the current
         // track is applied as soon as playback returns to the local route. Revisit once this
         // can be verified on real cast hardware (Phase 4, step 9).
         if (playerManager.player.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE) {
             Timber.tag("NowPlaying").d("apply skipped (remote route) eventId=%d", track.eventId)
             return
         }
-        lastAppliedEventId = track.eventId
+        lastAppliedTrack = track
         Timber.tag("NowPlaying").d("apply eventId=%d '%s - %s'", track.eventId, track.title, track.artist)
 
         playerManager.updateMediaItem(buildStationItem(track))
@@ -382,7 +388,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
      * track. The reconnect announces the current StreamTitle immediately, so the branding is
      * on screen for seconds, not for the rest of the drive.
      *
-     * [lastAppliedEventId] is cleared too: the returning track may well be the one that was
+     * [lastAppliedTrack] is cleared too: the returning track may well be the one that was
      * already showing, and dedup would otherwise swallow its re-apply.
      */
     private fun maybeHandleIdleGap() {
@@ -393,7 +399,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
         Timber.tag("NowPlaying").i("idle gap %d s — resetting stale display state", gapMs / 1000)
         pendingAdTrack = null
         clearAdState()
-        lastAppliedEventId = null
+        lastAppliedTrack = null
         applyTrackMetadata(TrackInfo.stationFallback())
     }
 
@@ -546,6 +552,33 @@ class RetroFmPlaybackService : MediaLibraryService() {
             // dispatcher preserves boundary order for back-to-back events.
             delay(RetroFmConfig.ICY_UPSTREAM_LEAD_MS)
             applyTrackMetadata(track)
+            fetchArtworkFor(track)
+        }
+    }
+
+    /**
+     * Second pass for the same track, carrying real album art. The stream gives us only text, so
+     * the cover has to be looked up over the network (see [ArtworkLookup]) — the title is applied
+     * first and unblocked, and the artwork upgrades it a moment later.
+     *
+     * Only one lookup is ever in flight: a new boundary cancels the previous one, so a slow
+     * response for a song that has already ended can't overwrite its successor.
+     */
+    private fun fetchArtworkFor(track: TrackInfo) {
+        artworkJob?.cancel()
+        artworkJob = serviceScope.launch {
+            val url = withContext(Dispatchers.IO) {
+                ArtworkLookup.artworkUrl(track.artist, track.title)
+            } ?: return@launch
+            // The boundary may have moved on while the lookup ran (or an ad break started and
+            // is holding this track). Apply only if it is still the track in question.
+            val stillRelevant = currentTrack?.eventId == track.eventId ||
+                pendingAdTrack?.eventId == track.eventId
+            if (!stillRelevant) {
+                Timber.tag("Artwork").d("artwork discarded — track moved on")
+                return@launch
+            }
+            applyTrackMetadata(track.copy(imageUrl = url))
         }
     }
 

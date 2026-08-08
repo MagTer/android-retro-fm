@@ -149,6 +149,25 @@ Retrofit and kotlinx-serialization are now unused by `:core` but still declared 
 `build.gradle.kts` — left in place deliberately, since a future replacement source will likely
 want them back.
 
+**Album art comes from iTunes Search now** (`ArtworkLookup`). The mount carries no artwork, so the
+first field test of 1.0.40 showed the station logo on every track — the pipeline was fine, but
+every track had the same `imageUrl`, and Media3's `CacheBitmapLoader` dedupes on the URI, so
+exactly one bitmap load happened all drive. Covers are looked up by "artist title" against the
+public keyless `itunes.apple.com/search` (resolved every track tested, including obscure ones),
+one request per boundary at most, hits *and* misses cached for the process lifetime. The
+`artworkUrl100` the API returns is upsized by swapping the rendition segment to `600x600bb`.
+
+Two consequences worth knowing before touching this:
+- The title is applied first and the artwork upgrades it in a second apply. That only works
+  because dedup compares the **whole** `TrackInfo`, not `eventId` — comparing ids would swallow
+  the artwork apply. Don't "optimise" that back.
+- A lookup is skipped when the parsed artist is the station name, which is what
+  `fromStreamTitle` yields for a separator-less StreamTitle ("Nyheterna"). Searching on that
+  returns confident nonsense.
+
+Art still routes through `AlbumArtContentProvider` as a `content://` URI — the AAOS rule above is
+unchanged, only the source of the remote URL moved.
+
 **Freeze protection is gone with the API.** The old defence proved a track stale from its
 `eventFinish`; the new stream carries no timestamps at all, so if this injector ever freezes the
 app will happily show one title forever. Nothing detects that today. A fix would need a

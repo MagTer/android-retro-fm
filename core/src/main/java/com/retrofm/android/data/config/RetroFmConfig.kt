@@ -32,6 +32,26 @@ object RetroFmConfig {
     const val LOGSINK_INGEST_URL = "https://applogs.falle.se/ingest"
 
     /**
+     * Per-track album art (see ArtworkLookup). The station's Icecast carries no artwork, so
+     * covers are resolved by "artist title" against the public, keyless iTunes Search API —
+     * at most one request per track boundary, with hits and misses cached.
+     */
+    const val ARTWORK_SEARCH_URL = "https://itunes.apple.com/search"
+
+    /**
+     * Requested artwork rendition. Apple serves any size from the same URL by swapping this
+     * path segment; 100x100 (what the API returns) is unusably small on a car display, and
+     * 1200x1200 is ~280 KB per track for no visible gain over 600x600's ~90 KB.
+     */
+    const val ARTWORK_RENDITION = "600x600bb"
+
+    /** Hard ceiling on an artwork lookup — art is a nicety, it must never hold up the display. */
+    const val ARTWORK_LOOKUP_TIMEOUT_MS = 5_000L
+
+    /** Entries kept in the in-memory artwork cache; a drive rarely revisits more than a few. */
+    const val ARTWORK_CACHE_ENTRIES = 100
+
+    /**
      * Backoff schedule for stream reconnect attempts after a player error. Escalates and then
      * holds at the last value — reconnect is retried indefinitely while playback is wanted (no
      * hard give-up), so the stream self-heals whenever validated internet returns.
