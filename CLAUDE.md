@@ -167,6 +167,17 @@ swapped the cover in afterwards; in the car that read as the logo flashing up an
 The cover is now resolved *before* the first apply, bounded by
 `ARTWORK_FIRST_APPLY_BUDGET_MS` (1.5 s) so a slow lookup can't hold the title hostage.
 
+**Never trust the API's first result.** Relevance ranking regularly puts a karaoke rendition or a
+different primary artist featuring the credited one on top ("ZZang KARAOKE – I'll Be Missing You",
+"Craig David – Rise & Fall (feat. Sting)" for a track credited to Sting). `ArtworkLookup.pick`
+scores 15 candidates — artist agreement above title agreement, junk renditions rejected outright —
+and returns **nothing** when the field is weak, because the station logo beats a confidently wrong
+album cover. `ArtworkLookupTest` pins the real cases.
+
+**Transport failures must not be cached.** A miss is cached only when the API actually answered.
+Caching a boot-time connection failure would poison that song for the whole process — the car
+starts before the modem is up, so that turns into "artwork works on some starts and not others".
+
 Two consequences worth knowing before touching this:
 - The title is applied first and the artwork upgrades it in a second apply. That only works
   because dedup compares the **whole** `TrackInfo`, not `eventId` — comparing ids would swallow

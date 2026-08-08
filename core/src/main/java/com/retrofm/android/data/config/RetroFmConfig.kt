@@ -39,6 +39,13 @@ object RetroFmConfig {
     const val ARTWORK_SEARCH_URL = "https://itunes.apple.com/search"
 
     /**
+     * Candidates fetched per lookup. Must stay well above 1: the API's top hit is regularly a
+     * karaoke rendition or a different primary artist featuring the credited one, so
+     * ArtworkLookup needs a field to score rather than a single answer to trust.
+     */
+    const val ARTWORK_SEARCH_LIMIT = 15
+
+    /**
      * Requested artwork rendition. Apple serves any size from the same URL by swapping this
      * path segment; 100x100 (what the API returns) is unusably small on a car display, and
      * 1200x1200 is ~280 KB per track for no visible gain over 600x600's ~90 KB.
