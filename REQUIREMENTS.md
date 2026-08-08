@@ -190,6 +190,12 @@ Nedanstående versioner har kontrollerats mot officiella källor (Android Develo
 - **Arkitekturmönster:** MVVM med Repository-lager
 
 ### Föreslagen modulstruktur
+
+> Detta är den *ursprungliga* skissen, inte dagens kodbas. `data/api`, `data/repository` och
+> `model/NowPlayingResponse` togs bort 2026-08-08 med Bauer-lagret — nu-spelas kommer från
+> strömmens ICY (`TrackInfo.fromStreamTitle`), och Retrofit-beroendet ovan är kvar men oanvänt.
+> Läs koden för aktuell struktur; den här listan uppdateras inte.
+
 ```
 com.retrofm.android
 ├── data
