@@ -27,8 +27,6 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.retrofm.android.core.R
 import com.retrofm.android.data.config.RetroFmConfig
 import com.retrofm.android.data.model.TrackInfo
-import com.retrofm.android.data.repository.NowPlayingRepository
-import com.retrofm.android.di.NetworkModule
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,10 +36,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import timber.log.Timber
-import java.text.ParseException
-import java.text.SimpleDateFormat
-import java.util.Locale
-import java.util.TimeZone
 
 class RetroFmPlaybackService : MediaLibraryService() {
 
@@ -56,7 +50,6 @@ class RetroFmPlaybackService : MediaLibraryService() {
     private lateinit var playerManager: PlayerManager
     private lateinit var mediaLibrarySession: MediaLibrarySession
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var metadataJob: Job? = null
     private var lastAppliedEventId: Long? = null
     private var currentTrack: TrackInfo? = null
     private var adUntilElapsedMs: Long? = null
@@ -72,26 +65,13 @@ class RetroFmPlaybackService : MediaLibraryService() {
     // nothing. Compared against on resume to catch "parked 15 min, everything on screen is
     // from the previous drive".
     private var lastAliveWallMs: Long? = null
-    // A real track title that arrived (via polling) while an ad break was active — held back
-    // so it can't replace the "Reklam" label over muted audio, applied when the break lifts.
+    // A real track title announced while an ad break was active — held back so it can't
+    // replace the "Reklam" label over muted audio, applied when the break lifts.
     private var pendingAdTrack: TrackInfo? = null
-    private val nowPlayingRepository = NowPlayingRepository(NetworkModule.retroFmApi)
 
     // On AAOS this app has no activity, so the Application's ON_STOP flush never fires in
     // the car — playback stopping / service destruction are the only end-of-drive signals.
     private val logsinkClient get() = (application as? RetroFmApplication)?.logsinkClient
-
-    /**
-     * True once ICY track metadata has arrived from the stream. From then on the display is
-     * driven by the stream itself (sample-accurate) and the schedule-based nowplaying polling
-     * — which runs ahead of what is audible by the buffering delay — stays off.
-     *
-     * Un-latched by [maybeHandleIdleGap] after a long playback gap: the process survives
-     * parking (the car keeps it in RAM), and a fresh connect's first ICY frame can be an
-     * unidentified eventdata/-1 (talk, jingle, ad block) that will never correct the display.
-     * Polling must be allowed back on until the stream proves it is announcing tracks again.
-     */
-    private var icyDriven = false
 
     override fun onCreate() {
         super.onCreate()
@@ -150,7 +130,6 @@ class RetroFmPlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         Timber.tag("Lifecycle").i("service onDestroy")
-        metadataJob?.cancel()
         serviceScope.cancel()
         mediaLibrarySession.release()
         playerManager.release()
@@ -162,91 +141,12 @@ class RetroFmPlaybackService : MediaLibraryService() {
         super.onDestroy()
     }
 
-    private fun startMetadataPolling() {
-        if (icyDriven) return
-        if (metadataJob?.isActive == true) return
-        metadataJob = serviceScope.launch {
-            // Consecutive answers whose event already finished — drives the poll backoff.
-            var pastFinishStreak = 0
-            while (isActive) {
-                val delayMs = nowPlayingRepository.fetchNowPlaying().fold(
-                    onSuccess = { track ->
-                        if (isStaleScheduleTrack(track)) {
-                            Timber.tag("NowPlaying").d(
-                                "poll result stale eventId=%d finish=%s — not applied",
-                                track.eventId, track.finishTime
-                            )
-                        } else {
-                            applyTrackMetadata(track)
-                        }
-                        val finishMillis = track.finishTime?.let { parseEventTimeMillis(it) }
-                        if (finishMillis != null && finishMillis <= System.currentTimeMillis()) {
-                            // The API is sitting on an ended event (ad/talk block, or plain
-                            // lag): back off instead of riding the 2 s floor until it flips.
-                            RetroFmConfig.METADATA_POLL_PAST_FINISH_BACKOFF_MS
-                                .getOrElse(pastFinishStreak++) {
-                                    RetroFmConfig.METADATA_POLL_PAST_FINISH_BACKOFF_MS.last()
-                                }
-                        } else {
-                            pastFinishStreak = 0
-                            nextPollDelayMs(track.finishTime)
-                        }
-                    },
-                    onFailure = { RetroFmConfig.METADATA_POLL_INTERVAL_MS }
-                )
-                delay(delayMs)
-            }
-        }
-    }
-
-    private fun stopMetadataPolling() {
-        metadataJob?.cancel()
-        metadataJob = null
-    }
-
-    private fun nextPollDelayMs(finishTime: String?): Long {
-        val finishMillis = finishTime?.let { parseEventTimeMillis(it) }
-            ?: return RetroFmConfig.METADATA_POLL_INTERVAL_MS
-        val remaining = finishMillis - System.currentTimeMillis() + 2_000L
-        return remaining.coerceIn(
-            RetroFmConfig.METADATA_POLL_MIN_INTERVAL_MS,
-            RetroFmConfig.METADATA_POLL_INTERVAL_MS
-        )
-    }
-
-    /**
-     * True when a track's timestamps describe an event that ended too long ago to be what
-     * anyone hears — the schedule API can serve events whole songs stale around ad/talk
-     * blocks (see RetroFmConfig.SCHEDULE_EVENT_STALE_AFTER_MS for the field case). Checked
-     * for schedule-derived tracks (polling, ad-break hold, post-ad resync) AND for
-     * eventdata-resolved ICY tracks: the stream was assumed to be its own ground truth, but
-     * the station's ICY injection can freeze — field case 2026-08-02, the stream announced
-     * the same song for two days straight while the nowplaying API sat empty. A track whose
-     * own eventdata finished ages ago is provably not what is on air, whoever announced it.
-     * Tracks without a finish timestamp (StreamTitle fallback, station branding) pass.
-     */
-    private fun isStaleScheduleTrack(track: TrackInfo): Boolean {
-        val finishMillis = track.finishTime?.let { parseEventTimeMillis(it) } ?: return false
-        return System.currentTimeMillis() - finishMillis > RetroFmConfig.SCHEDULE_EVENT_STALE_AFTER_MS
-    }
-
-    private fun parseEventTimeMillis(value: String): Long? = try {
-        val format = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).apply {
-            // Verified against live fetches 2026-07-22: the API's event timestamps are
-            // Swedish local time, not UTC.
-            timeZone = TimeZone.getTimeZone("Europe/Stockholm")
-        }
-        format.parse(value)?.time
-    } catch (e: ParseException) {
-        null
-    }
-
     private fun applyTrackMetadata(track: TrackInfo) {
         // Hold real track metadata for the duration of an ad break. Audio is muted and the
-        // surface shows "Reklam", so a title arriving from the (ad-unaware) polling loop must
-        // not replace the ad label mid-break — field logs showed songs flashing up over muted
-        // ad audio. The ad-end path clears ad state before applying its track, so it is
-        // unaffected; the held track is applied by clearAdState when the break lifts.
+        // surface shows "Reklam", so a title must not replace the ad label mid-break — field
+        // logs showed songs flashing up over muted ad audio. The ad-end path clears ad state
+        // before applying its track, so it is unaffected; the held track is applied by
+        // clearAdState when the break lifts.
         if (adUntilElapsedMs != null && track.eventId != RetroFmConfig.AD_EVENT_ID) {
             pendingAdTrack = track
             Timber.tag("NowPlaying").d("apply held during ad break eventId=%d", track.eventId)
@@ -365,9 +265,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
                 eventId = RetroFmConfig.AD_EVENT_ID,
                 title = RetroFmConfig.AD_DISPLAY_TITLE,
                 artist = RetroFmConfig.AD_DISPLAY_SUBTITLE,
-                imageUrl = RetroFmConfig.LOGO_PNG_URL,
-                startTime = null,
-                finishTime = null
+                imageUrl = RetroFmConfig.LOGO_PNG_URL
             )
         )
         // The car has no room for our own countdown UI (the system draws now-playing), so tick
@@ -390,9 +288,8 @@ class RetroFmPlaybackService : MediaLibraryService() {
             adUnmuteJob = serviceScope.launch {
                 delay(untilElapsedMs - SystemClock.elapsedRealtime())
                 // Fallback unmute at the announced deadline; usually the ad-end metadata
-                // (clearAdState via onMetadata) lands first or shortly after. This path has
-                // no ICY frame carrying the on-air track, so ask for a now-playing resync.
-                clearAdState(resyncNowPlaying = true, fade = true)
+                // (clearAdState via onMetadata) lands first or shortly after.
+                clearAdState(fade = true)
             }
         }
     }
@@ -403,7 +300,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
      *   deadline); a pause, cast transfer, or idle-gap reset restores instantly — there is
      *   nothing to ease into.
      */
-    private fun clearAdState(resyncNowPlaying: Boolean = false, fade: Boolean = false) {
+    private fun clearAdState(fade: Boolean = false) {
         if (adUntilElapsedMs == null) return
         Timber.tag("NowPlaying").d("ad break cleared")
         adUntilElapsedMs = null
@@ -427,19 +324,11 @@ class RetroFmPlaybackService : MediaLibraryService() {
         // the break) applies its own track right after, deduped if identical.
         val pending = pendingAdTrack
         pendingAdTrack = null
-        // Re-check staleness at application time — the hold can span a long break, and the
-        // API answer may already have been stale when it was held (field case 2026-07-28).
-        val freshPending = pending?.takeUnless { isStaleScheduleTrack(it) }
-        if (pending != null && freshPending == null) {
-            Timber.tag("NowPlaying").d(
-                "held track stale eventId=%d finish=%s — dropped",
-                pending.eventId, pending.finishTime
-            )
-        }
-        when {
-            freshPending != null -> applyTrackMetadata(freshPending)
-            resyncNowPlaying -> resyncNowPlayingAfterAdBreak()
-        }
+        // No post-ad resync any more: the Icecast mount announces the current StreamTitle on
+        // connect and at every boundary, so a break that ends without an ICY frame is corrected
+        // by the next one within a song, and a reconnect re-announces immediately. The old
+        // schedule fetch that filled this gap is gone with the Bauer API.
+        if (pending != null) applyTrackMetadata(pending)
     }
 
     /**
@@ -465,48 +354,6 @@ class RetroFmPlaybackService : MediaLibraryService() {
     }
 
     /**
-     * A break that ends at its announced deadline leaves the display with no source of truth:
-     * ICY only announces *changes*, and a preroll (every fresh connect/reconnect) joins the
-     * live program mid-song — that song's ICY frame was spliced long before we connected, so
-     * no frame will ever restore it. The schedule polling that would have covered the gap is
-     * latched off once [icyDriven]. One-shot now-playing fetch to resync the display; anything
-     * fresher that lands meanwhile (an ICY boundary, a new ad marker) wins over the result.
-     */
-    private fun resyncNowPlayingAfterAdBreak() {
-        if (!playerManager.player.playWhenReady) return
-        val trackAtFetch = currentTrack
-        serviceScope.launch {
-            nowPlayingRepository.fetchNowPlaying().fold(
-                onSuccess = { track ->
-                    // An ICY boundary applied a real track while we fetched — it is
-                    // sample-accurate, the schedule is not; keep it. (A -1 station fallback
-                    // applied by an empty frame does not outrank the fetch.)
-                    val sinceApplied = currentTrack
-                    if (sinceApplied !== trackAtFetch && sinceApplied != null && sinceApplied.eventId > 0) {
-                        return@fold
-                    }
-                    if (adUntilElapsedMs != null) return@fold
-                    if (isStaleScheduleTrack(track)) {
-                        // The API is lagging whole songs — a wrong title is worse than the
-                        // logo. Station branding until the next ICY boundary corrects it.
-                        Timber.tag("NowPlaying").d(
-                            "post-ad resync stale eventId=%d finish=%s — station branding",
-                            track.eventId, track.finishTime
-                        )
-                        applyTrackMetadata(NowPlayingRepository.stationFallback(-1L))
-                        return@fold
-                    }
-                    Timber.tag("NowPlaying").d("post-ad resync eventId=%d", track.eventId)
-                    applyTrackMetadata(track)
-                },
-                onFailure = { e ->
-                    Timber.tag("NowPlaying").w("post-ad resync failed: %s", e.toString())
-                }
-            )
-        }
-    }
-
-    /**
      * The audio side never resumes a stale buffer (a resume seeks the live edge); this is the
      * display's counterpart. Left alone, the last song of a drive sits on the idle now-playing
      * screen until the process dies — hours later it names a song a resume will not play.
@@ -521,7 +368,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
             if (playerManager.player.isPlaying || playerManager.player.playWhenReady) return@launch
             Timber.tag("NowPlaying").d("track info stale — reverting to station branding")
             pendingAdTrack = null
-            applyTrackMetadata(NowPlayingRepository.stationFallback(-1L))
+            applyTrackMetadata(TrackInfo.stationFallback())
         }
     }
 
@@ -531,10 +378,12 @@ class RetroFmPlaybackService : MediaLibraryService() {
      * timer never fires and the previous drive's song greets the next one. Called whenever
      * playback is (about to be) running again; if the last alive stamp is older than
      * [RetroFmConfig.TRACK_INFO_STALE_AFTER_MS], everything display-related from before the
-     * gap is stale: drop it to station branding, un-latch [icyDriven] so polling resumes
-     * (a fresh connect's first ICY frame may be an unidentified -1 that would otherwise
-     * "keep" the stale song — see onIcyTrackMetadata), and let polling / the next ICY
-     * boundary fill in the real track within seconds.
+     * gap is stale: drop it to station branding and let the next ICY frame fill in the real
+     * track. The reconnect announces the current StreamTitle immediately, so the branding is
+     * on screen for seconds, not for the rest of the drive.
+     *
+     * [lastAppliedEventId] is cleared too: the returning track may well be the one that was
+     * already showing, and dedup would otherwise swallow its re-apply.
      */
     private fun maybeHandleIdleGap() {
         val last = lastAliveWallMs ?: return
@@ -544,9 +393,8 @@ class RetroFmPlaybackService : MediaLibraryService() {
         Timber.tag("NowPlaying").i("idle gap %d s — resetting stale display state", gapMs / 1000)
         pendingAdTrack = null
         clearAdState()
-        icyDriven = false
         lastAppliedEventId = null
-        applyTrackMetadata(NowPlayingRepository.stationFallback(-1L))
+        applyTrackMetadata(TrackInfo.stationFallback())
     }
 
     private fun startPlaybackHeartbeat() {
@@ -579,10 +427,8 @@ class RetroFmPlaybackService : MediaLibraryService() {
                 // resumes with playWhenReady still true, so onPlayWhenReadyChanged never fires.
                 maybeHandleIdleGap()
                 startPlaybackHeartbeat()
-                startMetadataPolling()
             } else {
                 stopPlaybackHeartbeat()
-                stopMetadataPolling()
                 // isPlaying also drops during a mid-ad REBUFFER (playWhenReady still true) —
                 // clearing then unmuted the tail of the ad after every stall, which made ad
                 // muting look intermittent in the car. Only a real pause clears: a paused
@@ -671,74 +517,35 @@ class RetroFmPlaybackService : MediaLibraryService() {
 
     /**
      * A track boundary announced by the stream itself, delivered exactly when it becomes
-     * audible. The StreamUrl carries an eventdata id — look it up for full track info
-     * (title/artist/artwork); on lookup failure fall back to parsing the StreamTitle.
+     * audible. Since the 2026-08-08 move to the station's own Icecast this is the *only*
+     * now-playing source: the mount sends `StreamTitle='Title - Artist'` with no StreamUrl and
+     * no event id, so the title text is parsed directly (see [TrackInfo.fromStreamTitle]).
+     *
+     * The mount also announces the current title on connect, not just at changes, which is why
+     * no schedule fetch is needed to recover the display after a reconnect or an ad break.
      */
     private fun onIcyTrackMetadata(icy: IcyInfo) {
-        icyDriven = true
-        stopMetadataPolling()
-
-        val eventId = IcyAdMarker.parseEventId(icy.url)
-        Timber.tag("NowPlaying").d("icy boundary: eventId=%s title='%s'", eventId, icy.title)
+        Timber.tag("NowPlaying").d("icy boundary: title='%s'", icy.title)
+        val track = TrackInfo.fromStreamTitle(icy.title)
+        if (track == null) {
+            // Empty StreamTitle: jingles, between-song gaps, news. Reverting to the station
+            // logo on each of these made the car surface flash the logo between every pair of
+            // songs, so keep a real track that is already on screen (and no ad running) until
+            // the next boundary; only fall back to branding when there is nothing to keep.
+            val current = currentTrack
+            if (current != null && current.eventId > 0 && adUntilElapsedMs == null) {
+                Timber.tag("NowPlaying").d("empty icy frame — keeping current eventId=%d", current.eventId)
+                return
+            }
+            applyTrackMetadata(TrackInfo.stationFallback())
+            return
+        }
         serviceScope.launch {
-            val track = if (eventId != null && eventId > 0) {
-                nowPlayingRepository.fetchEventData(eventId)
-                    .getOrElse { e ->
-                        Timber.tag("NowPlaying").w("eventdata lookup failed for %d: %s", eventId, e.toString())
-                        trackFromStreamTitle(icy, eventId)
-                    }
-            } else {
-                // eventdata/-1 (or no url): nothing identified — jingles, between-song gaps,
-                // news. The stream emits one of these ~6-10 s before each song's real
-                // boundary; reverting to the station logo each time made the car surface flash
-                // the Retro FM logo between every pair of songs. If a real track is already on
-                // screen (and no ad is running), keep it until the next song's boundary instead.
-                val current = currentTrack
-                if (current != null && current.eventId > 0 && adUntilElapsedMs == null) {
-                    Timber.tag("NowPlaying").d("empty icy frame — keeping current eventId=%d", current.eventId)
-                    return@launch
-                }
-                NowPlayingRepository.stationFallback(eventId ?: -1L)
-            }
-            if (isStaleScheduleTrack(track)) {
-                // The stream's own announcement resolves to an event that finished long ago:
-                // the station's ICY injection is frozen (2026-08-02 — stuck on one song since
-                // two days, nowplaying API empty). A provably stale "ground truth" is no
-                // ground truth: station branding, and hand the display back to polling so a
-                // server-side recovery is picked up without waiting for the next boundary.
-                Timber.tag("NowPlaying").w(
-                    "icy track stale eventId=%d finish=%s — station branding, polling back on",
-                    track.eventId, track.finishTime
-                )
-                icyDriven = false
-                startMetadataPolling()
-                applyTrackMetadata(NowPlayingRepository.stationFallback(-1L))
-                return@launch
-            }
-            // Fetch first, then hold: compensates the station-side metadata lead (see
-            // RetroFmConfig.ICY_UPSTREAM_LEAD_MS). Launch order on the Main dispatcher
-            // preserves boundary order for back-to-back events.
+            // Hold before applying: compensates the station-side metadata lead (see
+            // RetroFmConfig.ICY_UPSTREAM_LEAD_MS, currently 0). Launch order on the Main
+            // dispatcher preserves boundary order for back-to-back events.
             delay(RetroFmConfig.ICY_UPSTREAM_LEAD_MS)
             applyTrackMetadata(track)
-        }
-    }
-
-    /** Last resort when the eventdata lookup fails: "Title - Artist" from the StreamTitle. */
-    private fun trackFromStreamTitle(icy: IcyInfo, eventId: Long): TrackInfo {
-        val parts = icy.title?.split(" - ", limit = 2)
-        val title = parts?.getOrNull(0)?.trim().orEmpty()
-        val artist = parts?.getOrNull(1)?.trim().orEmpty()
-        return if (title.isBlank()) {
-            NowPlayingRepository.stationFallback(eventId)
-        } else {
-            TrackInfo(
-                eventId = eventId,
-                title = title,
-                artist = artist.ifBlank { RetroFmConfig.STATION_NAME },
-                imageUrl = RetroFmConfig.LOGO_PNG_URL,
-                startTime = null,
-                finishTime = null
-            )
         }
     }
 

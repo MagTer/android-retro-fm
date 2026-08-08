@@ -4,15 +4,23 @@ object RetroFmConfig {
     const val STATION_NAME = "Retro FM"
     const val STATION_STRAPLINE = "Tidernas största hits"
     const val STATION_ID = 459
-    const val STATION_CODE = "res"
-    const val BRAND_CODE = "SE_RETROFM"
     const val BRAND_COLOR_HEX = "#000F2B"
 
-    const val STREAM_URL_MP3 =
-        "https://live-bauerse-fm.sharp-stream.com/retrofm_mp3?direct=true"
-
-    const val API_BASE_URL =
-        "https://listenapi.planetradio.co.uk/api9.2/"
+    /**
+     * The station's own Icecast (Mad Men Media), which is what `retrofm.se` itself plays. It
+     * replaced `live-bauerse-fm.sharp-stream.com/retrofm_mp3` on 2026-08-08: Retro FM left
+     * Bauer/RadioPlay, and that mount is a legacy relay whose ICY injector froze on 2026-07-31.
+     *
+     * Everything now-playing rides this stream: the mount sends `StreamTitle='Title - Artist'`
+     * inline (`icy-metaint 16000`), live and at real track boundaries, and announces the current
+     * track immediately on connect — so there is no schedule API to poll and nothing to resync
+     * after a gap. See CLAUDE.md, "The station moved to a new CDN".
+     *
+     * 96 kbps AAC+ is the only mount for this station: every sibling station here has a 192 kbps
+     * `<mount>_high`, but `retro_high` is 404. Re-check occasionally and prefer it if it appears.
+     */
+    const val STREAM_URL =
+        "https://stream.madmenmedia.se/retro"
 
     // The station's lock-screen asset: same artwork as the "logo" rendition but 1200x1200.
     // The original logo URL (…/v1588755887/…/ujznetkonskklgdql1yd.png) serves only 47x40 and
@@ -22,19 +30,6 @@ object RetroFmConfig {
 
     /** Remote log sink ingest (ADR-011, home-server repo). Key comes via BuildConfig. */
     const val LOGSINK_INGEST_URL = "https://applogs.falle.se/ingest"
-
-    const val METADATA_POLL_INTERVAL_MS = 30_000L
-    const val METADATA_POLL_MIN_INTERVAL_MS = 2_000L
-
-    /**
-     * Poll cadence while the nowplaying API answers with an already-finished event (ad/talk
-     * blocks, or the API lagging whole songs — see SCHEDULE_EVENT_STALE_AFTER_MS). Escalates
-     * one step per consecutive such answer and holds at the last value; any answer whose
-     * finish is still ahead resets it. Keeps the 2 s METADATA_POLL_MIN_INTERVAL_MS floor
-     * reserved for its legitimate case — an event finishing in the immediate future — instead
-     * of hammering the API for minutes during stale blocks (field logs 2026-07-28).
-     */
-    val METADATA_POLL_PAST_FINISH_BACKOFF_MS = listOf(2_000L, 5_000L, 10_000L, 30_000L)
 
     /**
      * Backoff schedule for stream reconnect attempts after a player error. Escalates and then
@@ -48,6 +43,11 @@ object RetroFmConfig {
      * showing the "Reklam" countdown so the silence is explained. Deliberate decision for the
      * private friends-and-family distribution (2026-07-22); flip to false if the app is ever
      * distributed more widely, since this suppresses the station's own monetization.
+     *
+     * UNVERIFIED on the Mad Men Media mount (2026-08-08 switch): the AdsWizz `adw_ad` markers
+     * this depends on came from Bauer's injector, and the new mount was only observed sending a
+     * bare `StreamTitle`. If the new provider splices ads without markers, ad muting silently
+     * does nothing and ads become audible — a behaviour change to listen for, not a code bug.
      */
     const val MUTE_ADS = true
 
@@ -106,18 +106,6 @@ object RetroFmConfig {
     const val ICY_UPSTREAM_LEAD_MS = 0L
 
     /**
-     * Reject schedule-API answers (nowplaying polling, post-ad resync, the ad-break hold)
-     * whose eventFinish lies further in the past than this. Field-proven 2026-07-28: right
-     * after an ad break the nowplaying API still served an event finished 6.5 minutes
-     * earlier ("Beds Are Burning") while Michael Jackson was audibly playing — the API can
-     * lag whole songs around ad/talk blocks. The grace must stay ABOVE the typical stream
-     * delay behind broadcast (~60 s measured: preroll ads + rebuffer debt), because for a
-     * delayed listener an event that just finished on air may still be the audible truth.
-     * ICY-driven tracks are never subjected to this check — the stream is ground truth.
-     */
-    const val SCHEDULE_EVENT_STALE_AFTER_MS = 90_000L
-
-    /**
      * How long the last track's metadata may stay on an idle (not playing) session before the
      * display reverts to station branding. Mirrors the audio-side rule that a resume never
      * replays a stale buffer: when the user returns to the car after this long, the song on
@@ -142,7 +130,13 @@ object RetroFmConfig {
      * processing — measured 2026-08-02 over 3 min with ffmpeg ebur128: integrated −5.2 LUFS,
      * LRA 1.1 LU — so −8.8 dB lands it at −14: 10^(−8.8/20) ≈ 0.36. Applied to the local
      * ExoPlayer only (a Cast receiver keeps its own level); lossless, since ExoPlayer scales
-     * in the float pipeline. Re-measure before changing: the station can retune its processing.
+     * in the float pipeline.
+     *
+     * STALE as of the 2026-08-08 CDN switch: that measurement was taken on Bauer's 192 kbps MP3
+     * relay, and the app now plays Mad Men Media's 96 kbps AAC+ mount, which is a different
+     * encoder behind different processing. The value is deliberately left unchanged rather than
+     * guessed — re-measure (`ffmpeg -i <mount> -af ebur128 -f null -` over ~3 min) and set
+     * 10^((−14 − integrated)/20), or calibrate by ear against Spotify on the car as before.
      */
     const val PLAYER_BASE_GAIN = 0.36f
 

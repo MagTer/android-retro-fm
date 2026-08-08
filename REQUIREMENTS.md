@@ -22,17 +22,32 @@ En dedikerad Android-app för att lyssna på **Retro FM** utan att gå via TuneI
 ## Tekniska lärdomar
 
 ### 1. Ljudström
-Retro FM sänds via Bauer Medias `sharp-stream.com`-infrastruktur. Följande direktlänkar har verifierats och returnerar `200 OK` utan krav på cookie-samtycke eller spårningsparametrar:
+
+**Aktuell källa (sedan 2026-08-08):** stationens egen Icecast hos Mad Men Media — samma ström som
+`retrofm.se` själv spelar.
 
 | Format | URL | Bitrate | Innehållstyp |
 |--------|-----|---------|--------------|
-| MP3 | `https://live-bauerse-fm.sharp-stream.com/retrofm_mp3?direct=true` | 192 kbps | `audio/mpeg` |
-| AAC+ | `https://live-bauerse-fm.sharp-stream.com/retrofm_aacp?direct=true` | 96 kbps | `audio/aac` |
+| AAC+ | `https://stream.madmenmedia.se/retro` | 96 kbps | `audio/aacp` |
 
-**Val för implementation:** MP3 används som primär ström eftersom den har bredare inbyggd stöd i Androids medieavkodare. AAC+ kan läggas till som alternativ senare.
+Det är enda mounten för Retro FM; systerstationerna på samma server har en `_high`-variant på
+192 kbps, men `retro_high` ger 404. Mounten bär **levande ICY-metadata** (`icy-metaint 16000`,
+`StreamTitle='Title - Artist'`) och annonserar aktuell låt redan vid anslutning.
+
+**Tidigare källa (Bauer, utfasad):** `live-bauerse-fm.sharp-stream.com/retrofm_mp3` (192 kbps MP3)
+och `…/retrofm_aacp` (96 kbps AAC+). De svarar fortfarande men är kvarglömda reläer — MP3-mountens
+ICY-injektor frös 2026-07-31 och AAC+-mounten skickar tom titel. Gå inte tillbaka dit.
 
 ### 2. Nu-spelas-data (metadata)
-RadioPlay:s webbplats (`https://radioplay.se/retrofm`) renderar nu-spelas-data serversidigt i sin `__NEXT_DATA__`. Den dynamiska källan har identifierats som:
+
+> **⚠️ Historik. Detta API används inte längre.** Retro FM har lämnat Bauer/RadioPlay:
+> `radioplay.se/retrofm` ger 404 och `nowplaying/res` svarar `[]`. Hela lagret (`RetroFmApi`,
+> `NowPlayingRepository`, `NetworkModule`, DTO:erna) togs bort 2026-08-08 när appen bytte till
+> stationens egen Icecast, där metadatan ligger i strömmen. **Nu-spelas kräver inget API alls** —
+> se `TrackInfo.fromStreamTitle` och avsnittet om CDN-bytet i `CLAUDE.md`. Beskrivningen nedan
+> dokumenterar hur integrationen såg ut när den fungerade.
+
+RadioPlay:s webbplats (`https://radioplay.se/retrofm`) renderade nu-spelas-data serversidigt i sin `__NEXT_DATA__`. Den dynamiska källan identifierades som:
 
 ```
 GET https://listenapi.planetradio.co.uk/api9.2/nowplaying/res
@@ -62,6 +77,10 @@ vid låtbytet (se `IcyAdMarker` i `:core`), som slås upp mot samma API. Schemap
 finns kvar som bootstrap/fallback tills första ICY-framen setts. Bilder laddas asynkront
 (i bilen via en `content://`-proxy — AAOS renderar inte fjärr-URI:er).
 
+**Så fungerar det idag:** ingen av ovanstående vägar används. Strömmen från Mad Men Media (§1) bär
+`StreamTitle='Title - Artist'` live, och `TrackInfo.fromStreamTitle` gör om den till visningsdata.
+Ingen pollning, inget uppslag, inget event-id — identiteten för dedup är en hash av titeltexten.
+
 ### 3. Spellista / nyligen spelat (valfri framtida funktion)
 Spellistesidan (`https://radioplay.se/retrofm/latlista`) har en motsvarande API-slutpunkt:
 
@@ -72,10 +91,19 @@ GET https://listenapi.planetradio.co.uk/api9.2/playlist/?StationCode=res
 **Noteringar:**
 - Parameternamnet är skiftlägeskänsligt: `StationCode` (stor bokstav S och C).
 - Returnerar en array med tidigare spelade låtar, samma format som now-playing-svaret.
-- Tidsstämplarna i svaret har i tester varit föråldrade (månad gamla), så denna endpoint bör inte användas som primär källa för "nu spelas".
-- Lämplig som framtida förbättring: en "senast spelat"-vy i appen.
+- **Endpointen är död.** Den svarar fortfarande 200 med 100 poster, men senaste posten är
+  `2026-07-09 07:08` (verifierat 2026-08-08) — datan uppdateras inte längre. Tidigare noterades
+  detta som "föråldrade tidsstämplar"; orsaken är att stationen lämnat plattformen, inte att
+  endpointen släpar.
+- En "senast spelat"-vy kräver därför en ny källa och är blockerad tills en sådan finns.
 
 ### 4. Stationsidentitet
+
+> Koderna nedan är Bauers, och stationen finns inte längre på den plattformen. `SE_RETROFM`
+> returnerar fortfarande en post från `brand/`-endpointen, men det är en kvarglömd rad vars
+> `BrandWebsiteUrl` pekar på en 404. Namn, strapline, färg och logotyper används fortfarande av
+> appen och fungerar; station-/varumärkeskoderna är däremot bara nycklar till död data.
+
 - **Station-ID:** 459
 - **Station-kod:** `res`
 - **Varumärkeskod:** `SE_RETROFM`

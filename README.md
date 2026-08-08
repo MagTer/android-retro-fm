@@ -14,8 +14,9 @@ En dedikerad Android-app för att lyssna på Retro FM utan att gå via aggregera
 - Återansluter automatiskt vid nätverksavbrott.
 - Detekterar serverinjicerad reklam och tystar den, med "Reklam"-nedräkning i UI:t
   (kan stängas av via `RetroFmConfig.MUTE_ADS`).
-- Låtinfo drivs primärt av strömmens ICY-metadata (exakt vid låtbytet); nu-spelas-API:t
-  används för uppslag och som fallback.
+- Låtinfo kommer från strömmens egen ICY-metadata, exakt vid låtbytet. Sedan 2026-08-08 spelar
+  appen stationens egen Icecast (Mad Men Media) i stället för Bauers gamla relä, vars metadata
+  frös i juli när Retro FM lämnade Bauer/RadioPlay. Inget API pollas längre. Se `CLAUDE.md`.
 - Skickar fältloggar till en privat loggsink för felsökning i bil (produktionsbilar saknar
   adb) — aldrig tokens, credential-URL:er eller PII (se `CLAUDE.md`).
 

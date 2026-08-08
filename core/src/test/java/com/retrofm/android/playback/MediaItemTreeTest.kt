@@ -28,7 +28,7 @@ class MediaItemTreeTest {
     @Test
     fun `station item keeps the configured MP3 stream uri`() {
         val config = MediaItemTree.getStationItem().localConfiguration
-        assertEquals(RetroFmConfig.STREAM_URL_MP3, config?.uri?.toString())
+        assertEquals(RetroFmConfig.STREAM_URL, config?.uri?.toString())
     }
 
     @Test

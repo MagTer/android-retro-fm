@@ -54,7 +54,7 @@ object MediaItemTree {
 
     private val stationMediaItem: MediaItem = MediaItem.Builder()
         .setMediaId(STATION_ID)
-        .setUri(RetroFmConfig.STREAM_URL_MP3)
+        .setUri(RetroFmConfig.STREAM_URL)
         // Mandatory for casting: the Media3 cast item converter throws on a MediaItem with no
         // mimeType. Harmless locally — ExoPlayer already sniffs the MP3 stream.
         .setMimeType(MimeTypes.AUDIO_MPEG)
