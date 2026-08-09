@@ -100,6 +100,24 @@ object RetroFmConfig {
     const val ARTWORK_READ_TIMEOUT_MS = 8_000L
 
     /**
+     * Attempts per lookup before giving up on the transport.
+     *
+     * Field data 2026-08-09, one recovered drive: 14 successes with a **median of 607 ms** and
+     * a worst case of 931 ms, against 3 failures — and all three timed out at exactly 8 s in
+     * the connect phase, on the first lookup after playback started (Madonna "Take A Bow",
+     * Céline Dion "My Heart Will Go On", Tina Turner "We Don't Need Another Hero"). The car's
+     * modem is warm for the audio stream but cold for a new host, and only the first request
+     * pays it.
+     *
+     * Those songs did eventually get their cover — but only because the mount re-announces a
+     * title mid-track, which re-ran the lookup ~3 minutes later. That is what "the artwork
+     * appears just as the song ends, during the jingle" was. A second attempt costs one extra
+     * request on a path that has just failed, and the evidence says it lands in under a second.
+     * Two is the cap: a third would be pressing an API that is clearly unreachable.
+     */
+    const val ARTWORK_LOOKUP_ATTEMPTS = 2
+
+    /**
      * How long an idle connection to the artwork API is kept for reuse. Longer than OkHttp's
      * 5 min default because track boundaries are 3–4 min apart: at the default a fair share of
      * lookups just miss the window and pay a fresh handshake on a link where that is exactly

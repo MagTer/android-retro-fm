@@ -175,7 +175,22 @@ delays the display: `ARTWORK_FIRST_APPLY_BUDGET_MS` still publishes the title at
 
 **Lookups log their elapsed time on every outcome.** That drive had to be diagnosed by
 subtracting the timeout from log timestamps; a number in the line makes the next one a
-measurement instead.
+measurement instead. It paid for itself the same evening — one recovered drive gave 14
+successes at a **median of 607 ms** (worst 931 ms) against 3 failures, all of them stalling at
+exactly the 8 s connect timeout. So the 20 s ceiling is not what bites; the connect phase is.
+
+**Only the first lookup of a playback session fails.** All three failures were the first track
+after playback started — the modem is warm for the audio stream but cold for a new host, and
+nothing else pays that cost. Hence `ARTWORK_LOOKUP_ATTEMPTS = 2`: one immediate retry, which
+the data says lands in under a second. Do not raise it — a third attempt would be pressing an
+API that is plainly unreachable.
+
+**The mount re-announces a title mid-track.** Confirmed 2026-08-09: the same `StreamTitle`
+arrives again 50–90 s into a song (`apply skipped (dedup)` when the metadata is unchanged).
+Two consequences. It is *not* a reconnect, so don't read it as one. And it is what made the
+first-lookup failures self-heal before the retry existed — the re-announcement re-ran the
+lookup, so the cover appeared roughly three minutes late, right as the song ended and the
+station jingle played. That was the reported "flickering" symptom, not a rendering bug.
 
 Two consequences worth knowing before touching this:
 - The title is applied first and the artwork upgrades it in a second apply. That only works

@@ -92,37 +92,53 @@ object ArtworkLookup {
         // only way to reason about it is inference from timestamps. See the 2026-08-09 entry
         // on ARTWORK_LOOKUP_TIMEOUT_MS.
         val startedAt = System.currentTimeMillis()
-        val results = try {
-            client.newCall(Request.Builder().url(url).build()).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Timber.tag("Artwork").w(
-                        "lookup HTTP %d for '%s' after %d ms",
-                        response.code, query, System.currentTimeMillis() - startedAt
-                    )
-                    return null // transport-ish failure: do not cache, retry on a later boundary
+        var results: List<SearchResult>? = null
+        for (attempt in 1..RetroFmConfig.ARTWORK_LOOKUP_ATTEMPTS) {
+            try {
+                client.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Timber.tag("Artwork").w(
+                            "lookup HTTP %d for '%s' after %d ms",
+                            response.code, query, System.currentTimeMillis() - startedAt
+                        )
+                        // The API answered, it just refused. Retrying immediately would only
+                        // press a server that is already saying no.
+                        return null
+                    }
+                    results = json.decodeFromString<SearchResponse>(
+                        response.body?.string().orEmpty()
+                    ).results
                 }
-                json.decodeFromString<SearchResponse>(response.body?.string().orEmpty()).results
+                break
+            } catch (e: Exception) {
+                // No connectivity yet at boot, a timeout, a malformed body. Caching this would
+                // poison the track for the whole process — a car that starts before the modem
+                // is up would then show the logo for every song it plays. Leave the cache
+                // untouched, so a repeat announcement of the same title gets a second chance.
+                val elapsed = System.currentTimeMillis() - startedAt
+                if (attempt < RetroFmConfig.ARTWORK_LOOKUP_ATTEMPTS) {
+                    Timber.tag("Artwork").w(
+                        "lookup attempt %d failed for '%s' after %d ms: %s — retrying",
+                        attempt, query, elapsed, e.toString()
+                    )
+                    continue
+                }
+                Timber.tag("Artwork").w(
+                    "lookup failed for '%s' after %d ms: %s", query, elapsed, e.toString()
+                )
+                return null
             }
-        } catch (e: Exception) {
-            // No connectivity yet at boot, a timeout, a malformed body. Caching this would
-            // poison the track for the whole process — a car that starts before the modem is
-            // up would then show the logo for every song it plays. Leave the cache untouched,
-            // so a repeat announcement of the same title gets a second chance.
-            Timber.tag("Artwork").w(
-                "lookup failed for '%s' after %d ms: %s",
-                query, System.currentTimeMillis() - startedAt, e.toString()
-            )
-            return null
         }
+        val fetched = results ?: return null
 
         // Past this point the API answered, so whatever we conclude is a real answer worth
         // remembering — including "nothing good enough".
-        val best = pick(artist, title, results)
+        val best = pick(artist, title, fetched)
         val result = best?.artworkUrl100?.replace(SMALL_RENDITION, RetroFmConfig.ARTWORK_RENDITION)
         synchronized(cache) { cache[query] = result }
         Timber.tag("Artwork").d(
             "lookup '%s' -> %s in %d ms", query,
-            best?.let { "${it.artistName} / ${it.trackName}" } ?: "no match (${results.size} candidates)",
+            best?.let { "${it.artistName} / ${it.trackName}" } ?: "no match (${fetched.size} candidates)",
             System.currentTimeMillis() - startedAt
         )
         return result
