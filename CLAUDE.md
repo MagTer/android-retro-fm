@@ -159,6 +159,22 @@ scores 15 candidates — artist agreement above title agreement, junk renditions
 and returns **nothing** when the field is weak, because the station logo beats a confidently wrong
 album cover. `ArtworkLookupTest` pins the real cases.
 
+**The cover belongs to the *album*, not the track — score the release too.** A candidate can
+match artist and title perfectly and still be wrong: "Take That – Back For Good" resolved to a
+100-track various-artists ballads compilation, so the car showed a generic montage (field-
+reported 2026-08-09). All fifteen candidates carried a parenthetical, so the plain-title
+tiebreak could not separate them and the pick fell through to Apple's own ordering.
+`collectionArtistName == "Various Artists"` is the signal, ranked above the plain-title
+preference and below artist/title agreement — a compilation still wins when it is the only
+candidate, since any cover beats the logo. Replaying the whole drive against the live API
+changed exactly two picks and regressed none: Take That, and a Jennifer Brown track that had
+silently landed on "100 hits från 90-talet".
+
+Two habits that came out of this and are worth keeping: **log the album, not just the track**
+(the old line read "Take That / Back for Good (Radio Mix)" and looked like a perfect hit), and
+**verify a ranking change by replaying real queries** rather than reasoning about the scoring —
+`entity=song&limit=15` against the live API is cheap and the whole drive fits in one pass.
+
 **Transport failures must not be cached.** A miss is cached only when the API actually answered.
 Caching a boot-time connection failure would poison that song for the whole process — the car
 starts before the modem is up, so that turns into "artwork works on some starts and not others".

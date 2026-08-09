@@ -11,8 +11,55 @@ import org.junit.Test
  */
 class ArtworkLookupTest {
 
-    private fun r(artist: String, track: String) =
-        SearchResult(artist, track, "https://is1-ssl.mzstatic.com/x/100x100bb.jpg")
+    private fun r(artist: String, track: String, album: String? = null, albumArtist: String? = null) =
+        SearchResult(
+            artist, track, "https://is1-ssl.mzstatic.com/x/100x100bb.jpg", album, albumArtist
+        )
+
+    /**
+     * Field case 2026-08-09: the car showed a generic "Love Songs - 100 Hits" montage for
+     * Take That. Every one of the fifteen candidates carried a parenthetical, so the
+     * plain-title tiebreak could not separate them and the pick fell through to Apple's own
+     * ordering — whose first hit was a various-artists compilation. Order below is verbatim
+     * from the live API.
+     */
+    @Test
+    fun `a various-artists compilation loses to the artist's own album`() {
+        val best = ArtworkLookup.pick(
+            "Take That", "Back For Good",
+            listOf(
+                r("Take That", "Back for Good (Radio Mix)", "Love Songs - 100 Hits", "Various Artists"),
+                r("Take That", "Back for Good (Radio Mix)", "Nobody Else (Expanded Edition)"),
+                r("Take That", "Back for Good (Radio Mix)", "Nobody Else (30th Anniversary Edition)"),
+                r("Take That", "Back for Good (Odyssey Mix)", "Odyssey"),
+                r("Take That", "Back for Good (Radio Mix)", "Girl Group vs Boy Band", "Various Artists")
+            )
+        )
+        assertEquals("Nobody Else (Expanded Edition)", best?.collectionName)
+    }
+
+    /** A compilation is a last resort, not a disqualification — a cover beats the logo. */
+    @Test
+    fun `a compilation still wins when it is the only candidate`() {
+        val best = ArtworkLookup.pick(
+            "Take That", "Back For Good",
+            listOf(r("Take That", "Back for Good (Radio Mix)", "Love Songs", "Various Artists"))
+        )
+        assertEquals("Love Songs", best?.collectionName)
+    }
+
+    /** Artist agreement still outranks the compilation signal. */
+    @Test
+    fun `an own-release by the wrong artist never beats the right artist`() {
+        val best = ArtworkLookup.pick(
+            "Take That", "Back For Good",
+            listOf(
+                r("Robbie Williams", "Back for Good (Live Version)", "Angels - EP"),
+                r("Take That", "Back for Good (Radio Mix)", "Love Songs", "Various Artists")
+            )
+        )
+        assertEquals("Take That", best?.artistName)
+    }
 
     @Test
     fun `exact artist and title wins`() {

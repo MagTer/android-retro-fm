@@ -40,8 +40,20 @@ object ArtworkLookup {
     internal data class SearchResult(
         @SerialName("artistName") val artistName: String = "",
         @SerialName("trackName") val trackName: String = "",
-        @SerialName("artworkUrl100") val artworkUrl100: String? = null
-    )
+        @SerialName("artworkUrl100") val artworkUrl100: String? = null,
+        /** Album the artwork actually belongs to. Logged, so a wrong cover is diagnosable. */
+        @SerialName("collectionName") val collectionName: String? = null,
+        /** "Various Artists" on a multi-artist compilation; absent on an artist's own release. */
+        @SerialName("collectionArtistName") val collectionArtistName: String? = null
+    ) {
+        /**
+         * True when the artwork is the artist's own release rather than a multi-artist
+         * compilation. A compilation's cover is generic by construction — the station's logo
+         * would be no worse — and Apple's relevance ranking is happy to put one first.
+         */
+        val ownRelease: Boolean
+            get() = !collectionArtistName.equals(VARIOUS_ARTISTS, ignoreCase = true)
+    }
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -136,9 +148,13 @@ object ArtworkLookup {
         val best = pick(artist, title, fetched)
         val result = best?.artworkUrl100?.replace(SMALL_RENDITION, RetroFmConfig.ARTWORK_RENDITION)
         synchronized(cache) { cache[query] = result }
+        // The album is logged, not just the track: the cover comes from the *release*, so
+        // "Take That / Back for Good (Radio Mix)" looked like a perfect hit in the log while
+        // the car was showing a compilation's montage.
         Timber.tag("Artwork").d(
             "lookup '%s' -> %s in %d ms", query,
-            best?.let { "${it.artistName} / ${it.trackName}" } ?: "no match (${fetched.size} candidates)",
+            best?.let { "${it.artistName} / ${it.trackName} [${it.collectionName ?: "?"}]" }
+                ?: "no match (${fetched.size} candidates)",
             System.currentTimeMillis() - startedAt
         )
         return result
@@ -186,7 +202,14 @@ object ArtworkLookup {
 
             // Prefer the plain single over live/remix/version entries when both qualify.
             val plain = if (candidate.trackName.contains('(') || candidate.trackName.contains('[')) 0 else 1
-            val score = listOf(artistScore, titleScore, plain, -index)
+            // Above `plain`, because a compilation cover is wrong in a way a "(Radio Mix)"
+            // suffix is not: it shows an unrelated montage instead of the album. Field case
+            // 2026-08-09 — "Take That / Back For Good" returned fifteen candidates that ALL
+            // carried a parenthetical, so `plain` could not separate them and the tiebreak
+            // fell through to Apple's own order, whose first hit was a 100-track
+            // various-artists ballads compilation.
+            val own = if (candidate.ownRelease) 1 else 0
+            val score = listOf(artistScore, titleScore, own, plain, -index)
             if (bestScore == null || compare(score, bestScore!!) > 0) {
                 best = candidate
                 bestScore = score
@@ -235,4 +258,5 @@ object ArtworkLookup {
     )
 
     private const val SMALL_RENDITION = "100x100bb"
+    private const val VARIOUS_ARTISTS = "Various Artists"
 }
