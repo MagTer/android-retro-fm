@@ -4,6 +4,7 @@ import com.retrofm.android.data.config.RetroFmConfig
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import timber.log.Timber
@@ -15,8 +16,11 @@ import java.util.concurrent.TimeUnit
  * Per-track album art, looked up by "artist title" against the public iTunes Search API.
  *
  * The station's Icecast announces only `StreamTitle='Title - Artist'` — no artwork, no ids — so
- * this is where covers come from. Apple documents no key requirement but does rate-limit:
- * one request per track boundary at most (~one per 3–4 min), nothing loops or retries.
+ * this is where covers come from. Apple documents no key requirement but does rate-limit, so
+ * the budget is one request per announced boundary and nothing loops: results are cached, one
+ * call is in flight at a time, and the next boundary cancels the previous. The only repeat is
+ * when the mount re-announces a title whose lookup failed in transport — deliberate, since that
+ * outcome is not cached, and still only a couple of requests per song.
  *
  * **Taking the API's first result is not good enough.** Relevance ranking happily returns a
  * karaoke rendition ("ZZang KARAOKE – I'll Be Missing You (Feat. Faith Evans)") or a different
@@ -41,9 +45,18 @@ object ArtworkLookup {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    /**
+     * Shared so consecutive track boundaries reuse one TLS connection — see
+     * [RetroFmConfig.ARTWORK_KEEP_ALIVE_MINUTES] for why the pool outlives OkHttp's default.
+     */
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .callTimeout(RetroFmConfig.ARTWORK_LOOKUP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .connectTimeout(RetroFmConfig.ARTWORK_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .readTimeout(RetroFmConfig.ARTWORK_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .connectionPool(
+                ConnectionPool(2, RetroFmConfig.ARTWORK_KEEP_ALIVE_MINUTES, TimeUnit.MINUTES)
+            )
             .build()
     }
 
@@ -74,10 +87,18 @@ object ArtworkLookup {
             "?term=" + URLEncoder.encode(query, "UTF-8") +
             "&entity=song&limit=" + RetroFmConfig.ARTWORK_SEARCH_LIMIT + "&country=SE"
 
+        // Elapsed time is logged on every outcome, success or not: the car's link is the
+        // variable that decides whether artwork appears, and without a number in the log the
+        // only way to reason about it is inference from timestamps. See the 2026-08-09 entry
+        // on ARTWORK_LOOKUP_TIMEOUT_MS.
+        val startedAt = System.currentTimeMillis()
         val results = try {
             client.newCall(Request.Builder().url(url).build()).execute().use { response ->
                 if (!response.isSuccessful) {
-                    Timber.tag("Artwork").w("lookup HTTP %d for '%s'", response.code, query)
+                    Timber.tag("Artwork").w(
+                        "lookup HTTP %d for '%s' after %d ms",
+                        response.code, query, System.currentTimeMillis() - startedAt
+                    )
                     return null // transport-ish failure: do not cache, retry on a later boundary
                 }
                 json.decodeFromString<SearchResponse>(response.body?.string().orEmpty()).results
@@ -85,8 +106,12 @@ object ArtworkLookup {
         } catch (e: Exception) {
             // No connectivity yet at boot, a timeout, a malformed body. Caching this would
             // poison the track for the whole process — a car that starts before the modem is
-            // up would then show the logo for every song it plays. Leave the cache untouched.
-            Timber.tag("Artwork").w("lookup failed for '%s': %s", query, e.toString())
+            // up would then show the logo for every song it plays. Leave the cache untouched,
+            // so a repeat announcement of the same title gets a second chance.
+            Timber.tag("Artwork").w(
+                "lookup failed for '%s' after %d ms: %s",
+                query, System.currentTimeMillis() - startedAt, e.toString()
+            )
             return null
         }
 
@@ -96,8 +121,9 @@ object ArtworkLookup {
         val result = best?.artworkUrl100?.replace(SMALL_RENDITION, RetroFmConfig.ARTWORK_RENDITION)
         synchronized(cache) { cache[query] = result }
         Timber.tag("Artwork").d(
-            "lookup '%s' -> %s", query,
-            best?.let { "${it.artistName} / ${it.trackName}" } ?: "no match (${results.size} candidates)"
+            "lookup '%s' -> %s in %d ms", query,
+            best?.let { "${it.artistName} / ${it.trackName}" } ?: "no match (${results.size} candidates)",
+            System.currentTimeMillis() - startedAt
         )
         return result
     }

@@ -76,8 +76,36 @@ object RetroFmConfig {
      */
     const val ARTWORK_RENDITION = "600x600bb"
 
-    /** Hard ceiling on an artwork lookup — art is a nicety, it must never hold up the display. */
-    const val ARTWORK_LOOKUP_TIMEOUT_MS = 5_000L
+    /**
+     * Hard ceiling on an artwork lookup. Generous on purpose: it does **not** gate the display —
+     * ARTWORK_FIRST_APPLY_BUDGET_MS below does that — so the only thing this bounds is how long
+     * a doomed request may sit on a socket. One request is in flight at a time and the next
+     * track boundary cancels it, so the real ceiling is the length of a song.
+     *
+     * It was 5 s until 2026-08-09, and that was too tight for the car. Field logs from that
+     * drive show **twelve consecutive lookups timing out** over 15 minutes while the audio
+     * stream played fine — the head unit's modem was flapping ("network lost" three times
+     * around that window), and every lookup had to pay DNS + TCP + TLS to a host the pool had
+     * just lost. One retransmitted SYN (1 s, then 2 s, then 4 s) alone overruns a 5 s budget.
+     * Payload is not the problem: iTunes gzips, so the 15-candidate response is ~3 KB on the
+     * wire.
+     */
+    const val ARTWORK_LOOKUP_TIMEOUT_MS = 20_000L
+
+    /**
+     * Per-phase timeouts inside that ceiling, so one wedged phase can't consume the whole budget
+     * while OkHttp still has another route it could have tried.
+     */
+    const val ARTWORK_CONNECT_TIMEOUT_MS = 8_000L
+    const val ARTWORK_READ_TIMEOUT_MS = 8_000L
+
+    /**
+     * How long an idle connection to the artwork API is kept for reuse. Longer than OkHttp's
+     * 5 min default because track boundaries are 3–4 min apart: at the default a fair share of
+     * lookups just miss the window and pay a fresh handshake on a link where that is exactly
+     * what times out. At 10 min a normal drive does one handshake, not one per song.
+     */
+    const val ARTWORK_KEEP_ALIVE_MINUTES = 10L
 
     /**
      * How long a track boundary waits for its cover before publishing metadata anyway.

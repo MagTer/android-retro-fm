@@ -163,6 +163,20 @@ album cover. `ArtworkLookupTest` pins the real cases.
 Caching a boot-time connection failure would poison that song for the whole process — the car
 starts before the modem is up, so that turns into "artwork works on some starts and not others".
 
+**The car's link, not the API, decides whether art appears.** Field logs 2026-08-09 caught
+twelve consecutive lookups timing out over 15 minutes — every track of the drive — while the
+audio stream played uninterrupted and the modem dropped three times around that window. The
+timeout was 5 s, which does not cover DNS + TCP + TLS to a host the connection pool has just
+lost; a single retransmitted SYN (1 s, 2 s, 4 s) overruns it alone. Payload was never the
+issue: iTunes gzips, so 15 candidates are ~3 KB on the wire, not 24 KB. Fixed in 1.0.45 by a
+20 s ceiling with 8 s phase timeouts and a 10 min connection pool — tracks are 3–4 min apart,
+so OkHttp's 5 min default was dropping the connection just often enough to matter. None of this
+delays the display: `ARTWORK_FIRST_APPLY_BUDGET_MS` still publishes the title at 1.5 s.
+
+**Lookups log their elapsed time on every outcome.** That drive had to be diagnosed by
+subtracting the timeout from log timestamps; a number in the line makes the next one a
+measurement instead.
+
 Two consequences worth knowing before touching this:
 - The title is applied first and the artwork upgrades it in a second apply. That only works
   because dedup compares the **whole** `TrackInfo`, not `eventId` — comparing ids would swallow
