@@ -23,17 +23,18 @@ class ArtworkLoggingBitmapLoader(private val delegate: BitmapLoader) : BitmapLoa
         delegate.decodeBitmap(data)
 
     override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> {
-        Timber.tag("Artwork").d("loadBitmap %s", uri)
+        val label = AlbumArtContentProvider.describe(uri)
+        Timber.tag("Artwork").d("loadBitmap %s", label)
         val future = delegate.loadBitmap(uri)
         Futures.addCallback(
             future,
             object : FutureCallback<Bitmap> {
                 override fun onSuccess(result: Bitmap) {
-                    Timber.tag("Artwork").d("loaded %dx%d for %s", result.width, result.height, uri)
+                    Timber.tag("Artwork").d("loaded %dx%d for %s", result.width, result.height, label)
                 }
 
                 override fun onFailure(t: Throwable) {
-                    Timber.tag("Artwork").w("load FAILED for %s: %s", uri, t.toString())
+                    Timber.tag("Artwork").w("load FAILED for %s: %s", label, t.toString())
                 }
             },
             MoreExecutors.directExecutor()

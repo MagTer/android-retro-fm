@@ -252,3 +252,17 @@ redeploy** of the log infra, so re-enable DEBUG before an investigation. The exa
 - The shim (`github.com/MagTer/logsink-shim`) **allowlists ingest fields server-side** — a new
   per-line field the client sends also needs a shim allowlist entry, release and redeploy
   before it reaches VictoriaLogs (it is silently stripped until then).
+- **A silent sink is not necessarily the app's fault — check the edge.** On 2026-08-09 the car
+  shipped 20 lines at boot and then nothing for 40 minutes, while its config polls kept
+  succeeding every 5 min. Cause was three hops away: Traefik's `public-buffering` middleware
+  (`maxRequestBodyBytes: 4096`, written for a static site) was also on the log *ingest* route,
+  so every NDJSON batch over 4 KB was refused at the edge and never reached the shim. The
+  client retried the identical bytes forever, blocking every line behind it. Fixed on both
+  sides: a dedicated `ingest-buffering` middleware at 512 KB matching the shim's own cap
+  (home-server repo), and a client that halves a 413'd batch instead of repeating it
+  (logsink-clients). **Diagnostic order that worked: VictoriaLogs → shim access log → proxy
+  log.** The shim log was decisive precisely because it showed *no* POSTs at all.
+- **Log lines cost wire bytes, so keep them short.** The artwork `content://` URIs are the
+  remote URL base64'd into the path — ~300 chars, twice per bitmap load. They alone filled the
+  batches that the 4 KB cap then rejected. `AlbumArtContentProvider.describe` renders them as
+  `host/lastSegment` instead; prefer that shape for anything logged in a loop.

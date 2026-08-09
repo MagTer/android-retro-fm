@@ -1,4 +1,4 @@
-// Vendored from github.com/MagTer/logsink-clients @ 85469af (android/, verbatim below this header).
+// Vendored from github.com/MagTer/logsink-clients @ 4d415f2 (android/, verbatim below this header).
 // JitPack consumption is not possible yet — that repo deliberately commits no Gradle wrapper
 // and has no jitpack.yml. Sync manually against upstream when it changes.
 package se.falle.logsink

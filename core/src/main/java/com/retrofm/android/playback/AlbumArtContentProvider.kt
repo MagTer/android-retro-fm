@@ -59,6 +59,20 @@ class AlbumArtContentProvider : ContentProvider() {
 
         private fun decode(token: String): String? =
             runCatching { String(Base64.decode(token, B64)) }.getOrNull()
+
+        /**
+         * Short, human-readable form of one of our content:// URIs, for logging.
+         *
+         * The raw URI is the remote URL base64'd into the path — ~300 characters of noise per
+         * line, and two lines per bitmap load. That is not just unreadable: it is what filled
+         * the log batches that a 4 KB proxy body limit then rejected (2026-08-09). Log lines
+         * are shipped over the wire, so their size is a real cost, not a cosmetic one.
+         */
+        fun describe(uri: Uri): String {
+            if (uri.authority != AUTHORITY) return uri.toString()
+            val remote = uri.lastPathSegment?.let { decode(it) } ?: return "content:(undecodable)"
+            return Uri.parse(remote).let { "${it.host}${it.lastPathSegment?.let { s -> "/$s" }.orEmpty()}" }
+        }
     }
 
     // Per-image locks so concurrent requests for the same art download it once (see openFile).
