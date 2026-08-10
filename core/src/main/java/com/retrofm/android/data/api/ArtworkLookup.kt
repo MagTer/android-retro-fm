@@ -103,33 +103,72 @@ object ArtworkLookup {
         val query = "$artist $title"
         synchronized(cache) { if (cache.containsKey(query)) return cache[query] }
 
+        val startedAt = System.currentTimeMillis()
+        val primary = search(query, startedAt) ?: return null
+        var best = pick(artist, title, primary)
+        var candidates = primary.size
+
+        // A joined credit can be too specific to match anything Apple indexes: the stream's
+        // "John Travolta + Olivia Newton-John" returned a single unrelated result, while the
+        // lead artist alone finds the Grease soundtrack whose credit then matches the full
+        // string exactly (field-reported 2026-08-10). Only on a miss, and the candidates are
+        // still scored against the FULL credit — a narrower search must not lower the bar.
+        if (best == null) {
+            val lead = leadArtist(artist)
+            if (lead != null) {
+                val retry = search("$lead $title", startedAt) ?: return null
+                best = pick(artist, title, retry)
+                candidates = retry.size
+            }
+        }
+
+        // Past this point the API answered, so whatever we conclude is a real answer worth
+        // remembering — including "nothing good enough".
+        val result = best?.artworkUrl100?.replace(SMALL_RENDITION, RetroFmConfig.ARTWORK_RENDITION)
+        synchronized(cache) { cache[query] = result }
+        // The album is logged, not just the track: the cover comes from the *release*, so
+        // "Take That / Back for Good (Radio Mix)" looked like a perfect hit in the log while
+        // the car was showing a compilation's montage.
+        Timber.tag("Artwork").d(
+            "lookup '%s' -> %s in %d ms", query,
+            best?.let { "${it.artistName} / ${it.trackName} [${it.collectionName ?: "?"}]" }
+                ?: "no match ($candidates candidates)",
+            System.currentTimeMillis() - startedAt
+        )
+        return result
+    }
+
+    /**
+     * One search against the API. Returns the candidate list, or null when the request never
+     * got an answer — a transport failure must stay uncached, so the caller has to be able to
+     * tell it apart from an empty result.
+     *
+     * [startedAt] is the whole lookup's start, so the logged elapsed time is what the car
+     * actually waited: the link is the variable that decides whether artwork appears, and
+     * without a number in the log the only way to reason about it is inference from
+     * timestamps. See the 2026-08-09 entry on ARTWORK_LOOKUP_TIMEOUT_MS.
+     */
+    private fun search(term: String, startedAt: Long): List<SearchResult>? {
         val url = RetroFmConfig.ARTWORK_SEARCH_URL +
-            "?term=" + URLEncoder.encode(query, "UTF-8") +
+            "?term=" + URLEncoder.encode(term, "UTF-8") +
             "&entity=song&limit=" + RetroFmConfig.ARTWORK_SEARCH_LIMIT + "&country=SE"
 
-        // Elapsed time is logged on every outcome, success or not: the car's link is the
-        // variable that decides whether artwork appears, and without a number in the log the
-        // only way to reason about it is inference from timestamps. See the 2026-08-09 entry
-        // on ARTWORK_LOOKUP_TIMEOUT_MS.
-        val startedAt = System.currentTimeMillis()
-        var results: List<SearchResult>? = null
         for (attempt in 1..RetroFmConfig.ARTWORK_LOOKUP_ATTEMPTS) {
             try {
                 client.newCall(Request.Builder().url(url).build()).execute().use { response ->
                     if (!response.isSuccessful) {
                         Timber.tag("Artwork").w(
                             "lookup HTTP %d for '%s' after %d ms",
-                            response.code, query, System.currentTimeMillis() - startedAt
+                            response.code, term, System.currentTimeMillis() - startedAt
                         )
                         // The API answered, it just refused. Retrying immediately would only
                         // press a server that is already saying no.
                         return null
                     }
-                    results = json.decodeFromString<SearchResponse>(
+                    return json.decodeFromString<SearchResponse>(
                         response.body?.string().orEmpty()
                     ).results
                 }
-                break
             } catch (e: Exception) {
                 // No connectivity yet at boot, a timeout, a malformed body. Caching this would
                 // poison the track for the whole process — a car that starts before the modem
@@ -139,33 +178,29 @@ object ArtworkLookup {
                 if (attempt < RetroFmConfig.ARTWORK_LOOKUP_ATTEMPTS) {
                     Timber.tag("Artwork").w(
                         "lookup attempt %d failed for '%s' after %d ms: %s — retrying",
-                        attempt, query, elapsed, e.toString()
+                        attempt, term, elapsed, e.toString()
                     )
                     continue
                 }
                 Timber.tag("Artwork").w(
-                    "lookup failed for '%s' after %d ms: %s", query, elapsed, e.toString()
+                    "lookup failed for '%s' after %d ms: %s", term, elapsed, e.toString()
                 )
                 return null
             }
         }
-        val fetched = results ?: return null
+        return null
+    }
 
-        // Past this point the API answered, so whatever we conclude is a real answer worth
-        // remembering — including "nothing good enough".
-        val best = pick(artist, title, fetched)
-        val result = best?.artworkUrl100?.replace(SMALL_RENDITION, RetroFmConfig.ARTWORK_RENDITION)
-        synchronized(cache) { cache[query] = result }
-        // The album is logged, not just the track: the cover comes from the *release*, so
-        // "Take That / Back for Good (Radio Mix)" looked like a perfect hit in the log while
-        // the car was showing a compilation's montage.
-        Timber.tag("Artwork").d(
-            "lookup '%s' -> %s in %d ms", query,
-            best?.let { "${it.artistName} / ${it.trackName} [${it.collectionName ?: "?"}]" }
-                ?: "no match (${fetched.size} candidates)",
-            System.currentTimeMillis() - startedAt
-        )
-        return result
+    /**
+     * The first credited artist when [artist] is a joined credit, else null.
+     *
+     * Used only to widen a search that found nothing, so a band name that merely contains a
+     * separator ("Mike & The Mechanics") costs at most one wasted request — the result is
+     * scored against the full credit either way.
+     */
+    internal fun leadArtist(artist: String): String? {
+        val cut = CREDIT_SEPARATOR.find(artist) ?: return null
+        return artist.substring(0, cut.range.first).trim().ifBlank { null }
     }
 
     /**
@@ -177,7 +212,7 @@ object ArtworkLookup {
      * than accepted as a "close enough" fallback.
      */
     internal fun pick(artist: String, title: String, results: List<SearchResult>): SearchResult? {
-        val wantArtist = normalize(artist)
+        val wantArtist = artistKey(artist)
         val wantTitle = baseTitle(title)
         if (wantArtist.isEmpty() || wantTitle.isEmpty()) return null
 
@@ -190,7 +225,7 @@ object ArtworkLookup {
             ) return@forEachIndexed
             if (candidate.artworkUrl100.isNullOrBlank()) return@forEachIndexed
 
-            val gotArtist = normalize(candidate.artistName)
+            val gotArtist = artistKey(candidate.artistName)
             val artistScore = when {
                 gotArtist == wantArtist -> 3
                 // "Kylie Minogue & Jason Donovan" when the stream credited only the first name.
@@ -247,6 +282,18 @@ object ArtworkLookup {
         return (0..h.size - n.size).any { h.subList(it, it + n.size) == n }
     }
 
+    /**
+     * [normalize] plus a dropped leading definite article, for comparing artist names.
+     *
+     * The station and Apple disagree about "The" often enough to matter, and the mismatch is
+     * fatal rather than cosmetic: whole-word containment only searches for the wanted name
+     * inside the candidate's, so a wanted name that is *longer* by one word matches nothing.
+     * "The Four Tops – Loco In Acapulco" rejected all fifteen candidates, every one of them
+     * credited "Four Tops", and the car showed the station logo (field-reported 2026-08-10).
+     */
+    private fun artistKey(value: String): String =
+        normalize(value).removePrefix("the ")
+
     /** Lowercase, strip diacritics and punctuation, collapse whitespace. */
     private fun normalize(value: String): String =
         Normalizer.normalize(value, Normalizer.Form.NFKD)
@@ -265,6 +312,12 @@ object ArtworkLookup {
     private val WHITESPACE = Regex("\\s+")
     private val BRACKETED = Regex("\\(.*?\\)|\\[.*?]")
     private val DASH_QUALIFIER = Regex("\\s+-\\s+")
+
+    /** Joins between co-credited artists in a StreamTitle. See [leadArtist]. */
+    private val CREDIT_SEPARATOR = Regex(
+        "\\s*(?:[+&,/]|\\b(?:feat\\.?|featuring|with|vs\\.?|duet with)\\b)\\s*",
+        RegexOption.IGNORE_CASE
+    )
     private val JUNK = Regex(
         "karaoke|tribute|made famous|instrumental|cover band|backing track|8-bit|lullaby",
         RegexOption.IGNORE_CASE

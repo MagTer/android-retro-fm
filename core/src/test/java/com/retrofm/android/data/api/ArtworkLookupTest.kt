@@ -70,6 +70,57 @@ class ArtworkLookupTest {
         assertEquals("Bedtime Stories", best?.collectionName)
     }
 
+    /**
+     * "The Four Tops – Loco In Acapulco" rejected all fifteen candidates and showed the logo:
+     * Apple credits the band "Four Tops", and whole-word containment only looks for the wanted
+     * name *inside* the candidate's, so a wanted name one word longer matches nothing
+     * (field-reported 2026-08-10).
+     */
+    @Test
+    fun `a leading definite article does not break the artist match`() {
+        val best = ArtworkLookup.pick(
+            "The Four Tops", "Loco In Acapulco",
+            listOf(r("Four Tops", "Loco in Acapulco", "Indestructible"))
+        )
+        assertEquals("Indestructible", best?.collectionName)
+    }
+
+    @Test
+    fun `the article is optional in both directions`() {
+        val best = ArtworkLookup.pick(
+            "Pointer Sisters", "I'm So Excited",
+            listOf(r("The Pointer Sisters", "I'm So Excited", "So Excited!"))
+        )
+        assertEquals("So Excited!", best?.collectionName)
+    }
+
+    /** Lead artist, used to widen a search that found nothing. */
+    @Test
+    fun `a joined credit yields its lead artist`() {
+        assertEquals("John Travolta", ArtworkLookup.leadArtist("John Travolta + Olivia Newton-John"))
+        assertEquals("Youssou N'Dour", ArtworkLookup.leadArtist("Youssou N'Dour & Neneh Cherry"))
+        assertEquals("Sting", ArtworkLookup.leadArtist("Sting feat. Craig David"))
+    }
+
+    @Test
+    fun `a single artist has no lead to fall back to`() {
+        assertNull(ArtworkLookup.leadArtist("Roxette"))
+        assertNull(ArtworkLookup.leadArtist("Alanis Morissette"))
+    }
+
+    /** The full credit still has to match — a narrower search must not lower the bar. */
+    @Test
+    fun `a joined credit matches a candidate that spells the join differently`() {
+        val best = ArtworkLookup.pick(
+            "John Travolta + Olivia Newton-John", "You're the One That I Want",
+            listOf(
+                r("Olivia Newton-John", "Hopelessly Devoted to You", "Grease"),
+                r("John Travolta & Olivia Newton-John", "You're the One That I Want", "Grease")
+            )
+        )
+        assertEquals("John Travolta & Olivia Newton-John", best?.artistName)
+    }
+
     /** A compilation is a last resort, not a disqualification — a cover beats the logo. */
     @Test
     fun `a compilation still wins when it is the only candidate`() {

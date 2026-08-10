@@ -181,6 +181,25 @@ tracks against the live API showed it wrecking six: Status Quo to a live album, 
 soundtrack, Louis Armstrong to a Christmas record, Madonna and Tina Turner to singles, Take
 That to an EP. It is deliberately absent from the score.
 
+**Two ways the credit strings themselves fail to line up**, both found 2026-08-10 and both
+showing the logo rather than a wrong cover, which is why they were invisible until the album
+started appearing in the log:
+
+- *A leading "The".* Whole-word containment only looks for the wanted artist **inside** the
+  candidate's, so a wanted name one word longer matches nothing — "The Four Tops" rejected all
+  fifteen rows, every one credited "Four Tops". Artist comparison drops a leading article on
+  both sides (`artistKey`).
+- *A joined credit is too specific to search.* "John Travolta + Olivia Newton-John You're the
+  One That I Want" returns **one** unrelated result. Searching the lead artist alone finds the
+  Grease soundtrack, whose "John Travolta & Olivia Newton-John" then matches the full credit
+  exactly. So a miss retries with `leadArtist`, and the candidates are still scored against
+  the **full** credit — a narrower search must never lower the bar.
+
+Known and deliberately unfixed: **the station's own typos.** "Starship – We Build This City"
+finds nothing because the song is "We *Built* This City". Fuzzy title matching would fix one
+sample and put a wrong cover on who knows how many others; leave it until the log shows a
+pattern.
+
 Three habits worth keeping: **log the album, not just the track** (the old line read "Take That
 / Back for Good (Radio Mix)" and looked like a perfect hit); **replay real queries** to judge a
 ranking change instead of reasoning about the scoring — `entity=song&limit=15` is cheap and a
