@@ -250,11 +250,27 @@ Two consequences worth knowing before touching this:
 Art still routes through `AlbumArtContentProvider` as a `content://` URI — the AAOS rule above is
 unchanged, only the source of the remote URL moved.
 
-**Freeze protection is gone with the API.** The old defence proved a track stale from its
-`eventFinish`; the new stream carries no timestamps at all, so if this injector ever freezes the
-app will happily show one title forever. Nothing detects that today. A fix would need a
-text-based heuristic (same StreamTitle across an implausible span) — deliberately not written
-blind, because it would also suppress a legitimately long block.
+**Freeze protection is elapsed-time only** (`TRACK_FROZEN_AFTER_MS`, 8 min). The old defence
+proved a track stale from its `eventFinish`; this stream carries no timestamps, so nothing but
+the clock is available. The threshold comes from listening to the mount directly for 50 minutes
+(2026-08-10, 14 consecutive tracks): the longest a real title legitimately held the display was
+**312 s**, so 8 min has a >50 % margin while still catching an injector stuck for days — the
+"always Talk Talk" failure that forced the migration.
+
+**Non-music is invisible, and no timeout will fix that.** During news, jingles and ads the mount
+emits *nothing* — not an empty `StreamTitle`, not "Nyheterna" — so the last song's title stays on
+screen through the bulletin. It is tempting to blank the display after N seconds of silence.
+Measured, that cannot work: the confirmed news episode held **312 s** and the longest legitimate
+song ("Piano Man") held **312 s**. The distributions do not overlap, they coincide. The
+re-announcement is no better — the mount repeats the current title once per track at an offset
+of 84–309 s, sometimes not at all, so "no repeat by now" fires mid-song too. Both heuristics
+were killed on 27 tracks of evidence; don't re-derive them from a smaller sample. If the station
+ever starts announcing non-music, use that signal instead.
+
+The capture that settled it is a ~40-line script: connect once with `Icy-MetaData: 1`, read
+`icy-metaint` bytes, read the length byte, print non-empty blocks with a timestamp. One
+listener connection, no polling — the polite way to ask this mount a question, and far better
+evidence than inferring cadence from the car's log.
 
 ### retrofm.se: dead ends, so nobody re-runs them (probed 2026-08-08)
 

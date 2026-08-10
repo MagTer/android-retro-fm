@@ -233,6 +233,29 @@ object RetroFmConfig {
     const val PLAYBACK_HEARTBEAT_MS = 30_000L
 
     /**
+     * How long one title may stay on screen *while playing* before it is treated as a frozen
+     * injector and the display reverts to station branding.
+     *
+     * This is the defence that did not exist when Bauer's relay froze on 2026-07-31 and the app
+     * showed "Talk Talk – It's My Life" for a week — the failure that started the whole
+     * migration. The new mount carries no timestamps, so nothing but elapsed time can detect it.
+     *
+     * Threshold picked from measurement, not taste. Listening to the mount directly for 50 min
+     * (2026-08-10, 14 consecutive tracks) the longest a real title legitimately held the display
+     * was **312 s** — "Piano Man". Car logs agree: max 312 s. 8 min leaves a >50 % margin over
+     * the observed worst case, so a long block cannot trip it, while a genuinely stuck injector
+     * (which held for *days*) is caught within one song's length.
+     *
+     * **This does not fix the news bulletin, and no timeout can.** The mount emits nothing at
+     * all for non-music — no empty StreamTitle, no "Nyheterna" — so a news slot looks exactly
+     * like a long song. Measured: the confirmed news episode held 312 s, the same as Piano Man.
+     * The distributions do not merely overlap, they coincide. Anything that blanks the display
+     * during news would blank it mid-song just as often. Do not re-derive this from a smaller
+     * sample and "fix" it; if the station ever starts announcing non-music, use that instead.
+     */
+    const val TRACK_FROZEN_AFTER_MS = 8 * 60_000L
+
+    /**
      * Constant attenuation of the local player, aligning the stream's loudness with what
      * normalized services play at (Spotify et al. normalize to −14 LUFS; the user matched
      * volume-knob positions against Spotify on the car). The stream carries full FM broadcast

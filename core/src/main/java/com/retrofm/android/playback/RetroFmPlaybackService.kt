@@ -56,6 +56,9 @@ class RetroFmPlaybackService : MediaLibraryService() {
     private var lastAppliedTrack: TrackInfo? = null
     private var artworkJob: Job? = null
     private var currentTrack: TrackInfo? = null
+
+    /** Wall clock at which [currentTrack] became the displayed track; see the freeze check. */
+    private var currentTrackAppliedWallMs: Long? = null
     private var adUntilElapsedMs: Long? = null
     private var adUnmuteJob: Job? = null
     private var adCountdownJob: Job? = null
@@ -183,6 +186,13 @@ class RetroFmPlaybackService : MediaLibraryService() {
         Timber.tag("NowPlaying").d("apply eventId=%d '%s - %s'", track.eventId, track.title, track.artist)
 
         playerManager.updateMediaItem(buildStationItem(track))
+
+        // Stamped only when the track itself changes, so the artwork's second apply does not
+        // restart the freeze clock (see maybeHandleFrozenMetadata). Wall clock, not uptime:
+        // the car suspends to RAM and uptime stands still while it does.
+        if (track.eventId != currentTrack?.eventId) {
+            currentTrackAppliedWallMs = System.currentTimeMillis()
+        }
 
         // Live browse tile: the station's browse representation mirrors the current track,
         // so tell connected browsers (the car's media host) to re-fetch it.
@@ -414,9 +424,36 @@ class RetroFmPlaybackService : MediaLibraryService() {
         playbackHeartbeatJob = serviceScope.launch {
             while (isActive) {
                 lastAliveWallMs = System.currentTimeMillis()
+                maybeHandleFrozenMetadata()
                 delay(RetroFmConfig.PLAYBACK_HEARTBEAT_MS)
             }
         }
+    }
+
+    /**
+     * Drop back to station branding when one title has been on screen, while playing, for
+     * longer than any real track — the injector has frozen and the display is lying.
+     *
+     * This is the defence that did not exist when the old Bauer relay froze on 2026-07-31 and
+     * the app showed "Talk Talk – It's My Life" for a week. It is deliberately blunt: it
+     * cannot tell a frozen injector from a very long block, so the threshold sits far above
+     * anything observed (see [RetroFmConfig.TRACK_FROZEN_AFTER_MS]).
+     *
+     * It does **not** solve the news bulletin, and no timeout can — see the config comment.
+     */
+    private fun maybeHandleFrozenMetadata() {
+        val current = currentTrack ?: return
+        if (current.eventId <= 0) return // already branding, or an ad
+        if (adUntilElapsedMs != null) return
+        val appliedAt = currentTrackAppliedWallMs ?: return
+        val heldMs = System.currentTimeMillis() - appliedAt
+        if (heldMs < RetroFmConfig.TRACK_FROZEN_AFTER_MS) return
+        Timber.tag("NowPlaying").w(
+            "metadata frozen — '%s' held %d s while playing, reverting to branding",
+            current.title, heldMs / 1000
+        )
+        lastAppliedTrack = null
+        applyTrackMetadata(TrackInfo.stationFallback())
     }
 
     private fun stopPlaybackHeartbeat() {
