@@ -164,16 +164,28 @@ match artist and title perfectly and still be wrong: "Take That – Back For Goo
 100-track various-artists ballads compilation, so the car showed a generic montage (field-
 reported 2026-08-09). All fifteen candidates carried a parenthetical, so the plain-title
 tiebreak could not separate them and the pick fell through to Apple's own ordering.
-`collectionArtistName == "Various Artists"` is the signal, ranked above the plain-title
-preference and below artist/title agreement — a compilation still wins when it is the only
-candidate, since any cover beats the logo. Replaying the whole drive against the live API
-changed exactly two picks and regressed none: Take That, and a Jennifer Brown track that had
-silently landed on "100 hits från 90-talet".
+`collectionArtistName` is the signal, ranked above the plain-title preference and below
+artist/title agreement — a compilation still wins when it is the only candidate, since any
+cover beats the logo.
 
-Two habits that came out of this and are worth keeping: **log the album, not just the track**
-(the old line read "Take That / Back for Good (Radio Mix)" and looked like a perfect hit), and
-**verify a ranking change by replaying real queries** rather than reasoning about the scoring —
-`entity=song&limit=15` against the live API is cheap and the whole drive fits in one pass.
+**Detect it structurally, never by its text.** The field is absent on an artist's own album and
+set to an album-level credit on a compilation; the rule is "present and disagrees with the
+artist". Matching the literal `"Various Artists"` looked generic and was not: `country=SE`
+makes Apple localise it, so every Swedish row reads **"Blandade Artister"** and slipped
+straight through — "Pointer Sisters – I'm So Excited" landed on a 100-track "80s 100 Hits" the
+day after the rule shipped.
+
+**Track count is not a usable signal, and this was measured.** "Prefer the shorter release"
+sounds like it should favour an original album over a best-of. Replaying all eighteen logged
+tracks against the live API showed it wrecking six: Status Quo to a live album, Clapton to a
+soundtrack, Louis Armstrong to a Christmas record, Madonna and Tina Turner to singles, Take
+That to an EP. It is deliberately absent from the score.
+
+Three habits worth keeping: **log the album, not just the track** (the old line read "Take That
+/ Back for Good (Radio Mix)" and looked like a perfect hit); **replay real queries** to judge a
+ranking change instead of reasoning about the scoring — `entity=song&limit=15` is cheap and a
+whole drive fits in one pass, and it is what killed the track-count idea; and treat **any
+API string that Apple localises as unusable for logic** — `country=SE` is on every request.
 
 **Transport failures must not be cached.** A miss is cached only when the API actually answered.
 Caching a boot-time connection failure would poison that song for the whole process — the car

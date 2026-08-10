@@ -43,16 +43,24 @@ object ArtworkLookup {
         @SerialName("artworkUrl100") val artworkUrl100: String? = null,
         /** Album the artwork actually belongs to. Logged, so a wrong cover is diagnosable. */
         @SerialName("collectionName") val collectionName: String? = null,
-        /** "Various Artists" on a multi-artist compilation; absent on an artist's own release. */
+        /** Album-level credit. Absent on an artist's own release; set on a compilation. */
         @SerialName("collectionArtistName") val collectionArtistName: String? = null
     ) {
         /**
-         * True when the artwork is the artist's own release rather than a multi-artist
-         * compilation. A compilation's cover is generic by construction — the station's logo
-         * would be no worse — and Apple's relevance ranking is happy to put one first.
+         * True when the artwork is the artist's own release rather than a compilation. A
+         * compilation's cover is generic by construction — the station's logo would be no
+         * worse — and Apple's relevance ranking is happy to put one first.
+         *
+         * Detected structurally: the field is **absent** on an artist's own album and **set**
+         * to an album-level credit on a compilation. Do not match its text. The first attempt
+         * compared it to the literal "Various Artists" and missed every Swedish row, because
+         * `country=SE` makes Apple localise it — "Pointer Sisters – I'm So Excited" resolved
+         * to a 100-track "80s 100 Hits" whose credit read **"Blandade Artister"**
+         * (field-reported 2026-08-10). Presence-and-disagreement carries no language at all.
          */
         val ownRelease: Boolean
-            get() = !collectionArtistName.equals(VARIOUS_ARTISTS, ignoreCase = true)
+            get() = collectionArtistName.isNullOrBlank() ||
+                normalize(collectionArtistName) == normalize(artistName)
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -206,9 +214,14 @@ object ArtworkLookup {
             // suffix is not: it shows an unrelated montage instead of the album. Field case
             // 2026-08-09 — "Take That / Back For Good" returned fifteen candidates that ALL
             // carried a parenthetical, so `plain` could not separate them and the tiebreak
-            // fell through to Apple's own order, whose first hit was a 100-track
-            // various-artists ballads compilation.
+            // fell through to Apple's order, whose first hit was a 100-track compilation.
             val own = if (candidate.ownRelease) 1 else 0
+            // Deliberately NOT a term here: track count. "Prefer the shorter release" sounds
+            // like it should favour an original album over a best-of, and replaying every
+            // logged track against the live API showed it wrecking six of eighteen picks —
+            // Status Quo to a live album, Clapton to a soundtrack, Louis Armstrong to a
+            // Christmas record, Madonna and Tina Turner to singles. Measure before adding a
+            // dimension that merely sounds reasonable.
             val score = listOf(artistScore, titleScore, own, plain, -index)
             if (bestScore == null || compare(score, bestScore!!) > 0) {
                 best = candidate
@@ -258,5 +271,4 @@ object ArtworkLookup {
     )
 
     private const val SMALL_RENDITION = "100x100bb"
-    private const val VARIOUS_ARTISTS = "Various Artists"
 }

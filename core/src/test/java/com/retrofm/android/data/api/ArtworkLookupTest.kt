@@ -38,6 +38,38 @@ class ArtworkLookupTest {
         assertEquals("Nobody Else (Expanded Edition)", best?.collectionName)
     }
 
+    /**
+     * The compilation credit is **localised** — `country=SE` returns "Blandade Artister", not
+     * "Various Artists". Matching the English literal missed every Swedish row and put
+     * "Pointer Sisters – I'm So Excited" on a 100-track "80s 100 Hits" (field-reported
+     * 2026-08-10). The rule must be structural: the field is set, and disagrees with the
+     * artist.
+     */
+    @Test
+    fun `a localised compilation credit is still a compilation`() {
+        val best = ArtworkLookup.pick(
+            "Pointer Sisters", "I'm So Excited",
+            listOf(
+                r("The Pointer Sisters", "I'm So Excited", "80s 100 Hits", "Blandade Artister"),
+                r("The Pointer Sisters", "I'm So Excited", "So Excited!")
+            )
+        )
+        assertEquals("So Excited!", best?.collectionName)
+    }
+
+    /** An album credited to the artist themselves is their own release, not a compilation. */
+    @Test
+    fun `an album credit matching the artist is not a compilation`() {
+        val best = ArtworkLookup.pick(
+            "Madonna", "Take A Bow",
+            listOf(
+                r("Madonna", "Take a Bow", "Hits Collection", "Blandade Artister"),
+                r("Madonna", "Take a Bow", "Bedtime Stories", "Madonna")
+            )
+        )
+        assertEquals("Bedtime Stories", best?.collectionName)
+    }
+
     /** A compilation is a last resort, not a disqualification — a cover beats the logo. */
     @Test
     fun `a compilation still wins when it is the only candidate`() {
