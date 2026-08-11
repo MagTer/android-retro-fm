@@ -277,12 +277,12 @@ marker means "the next song is queued", its absence is the news signal — and a
 observable as a timeout from the track start, which puts us back at 312-versus-312.
 
 What it *can* do is catch "the song ended and nothing musical followed", and that is what
-`TRACK_HANDOVER_GRACE_MS` does. The threshold comes from the shape of the distribution, not
-from taste: marker-to-next-title over 17 hand-overs is 3–14 s for fifteen of them, one at 25 s,
-**then nothing at all until 148 s**. 60 s sits in that empty band with 2.4× margin over the
-worst jingle. The intuition was 12 s and the data rejected it — three hand-overs exceed it, and
-the 25 s sample only surfaced in a second hour of listening, so the tail is not tightly known.
-When in doubt widen: blanking a song that is still playing is worse than a stale title.
+`TRACK_HANDOVER_GRACE_MS` does. Marker-to-next-title over 17 hand-overs is 3–14 s for fifteen
+of them, one at 25 s, **then nothing at all until 148 s**. The value is **15 s** — a maintainer
+decision taken inside the observed range rather than above it, trading one early blank in
+sixteen hand-overs (the 25 s outlier, ~10 s of logo) for reacting 45 s sooner on a real
+interruption. Raise it toward 30 s if the car ever shows the logo flashing between ordinary
+songs; that still catches everything worth catching.
 
 The capture that settled it is a ~40-line script: connect once with `Icy-MetaData: 1`, read
 `icy-metaint` bytes, read the length byte, print non-empty blocks with a timestamp. One

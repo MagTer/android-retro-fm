@@ -242,17 +242,19 @@ object RetroFmConfig {
      * 25 s — then nothing until 148 s.** That empty band between 25 s and 148 s is the whole
      * basis for this number.
      *
-     * 60 s sits in the middle of it: 2.4× the longest jingle actually seen, so a normal
-     * hand-over is never interrupted, and still well under the kind of interruption worth
-     * reacting to. 12 s was the intuition and the data rejects it — it would have blanked the
-     * display early on 3 of 17 hand-overs, and the 25 s sample only appeared after a second
-     * hour of listening, so the tail is not tightly known. Widen rather than narrow if in
-     * doubt: blanking a song that is still playing is a worse error than a stale title.
+     * 15 s is a deliberate choice *inside* the observed jingle range rather than above it
+     * (maintainer's call, 2026-08-11, made with the distribution in hand). It clears fifteen of
+     * the seventeen hand-overs, so the known cost is the 25 s outlier: roughly one hand-over in
+     * sixteen shows branding for ten seconds before the next title lands. Bought with that: the
+     * display stops lying 45 s sooner on a real interruption. The alternative considered was
+     * 60 s, sitting in the empty band with no early blanking at all but a full minute of stale
+     * title. If field use shows the logo flashing between ordinary songs, this is the number to
+     * raise — 30 s still catches everything worth catching.
      *
      * This does **not** catch the news bulletin, which is announced by nothing at all — see
      * TRACK_FROZEN_AFTER_MS. It catches a song that ended into something long and unannounced.
      */
-    const val TRACK_HANDOVER_GRACE_MS = 60_000L
+    const val TRACK_HANDOVER_GRACE_MS = 15_000L
 
     /**
      * How long one title may stay on screen *while playing* before it is treated as a frozen
