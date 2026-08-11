@@ -233,6 +233,28 @@ object RetroFmConfig {
     const val PLAYBACK_HEARTBEAT_MS = 30_000L
 
     /**
+     * How long the display keeps a finished song's title after the mount has signalled that the
+     * song is ending, before handing back to station branding.
+     *
+     * The mount repeats the current `StreamTitle` once shortly before the next one — an
+     * end-of-track marker in all but name. Measured from marker to next title across 17
+     * transitions (2026-08-10/11 captures): **3, 4, 6, 6, 7, 7, 7, 8, 8, 8, 8, 8, 11, 12, 14,
+     * 25 s — then nothing until 148 s.** That empty band between 25 s and 148 s is the whole
+     * basis for this number.
+     *
+     * 60 s sits in the middle of it: 2.4× the longest jingle actually seen, so a normal
+     * hand-over is never interrupted, and still well under the kind of interruption worth
+     * reacting to. 12 s was the intuition and the data rejects it — it would have blanked the
+     * display early on 3 of 17 hand-overs, and the 25 s sample only appeared after a second
+     * hour of listening, so the tail is not tightly known. Widen rather than narrow if in
+     * doubt: blanking a song that is still playing is a worse error than a stale title.
+     *
+     * This does **not** catch the news bulletin, which is announced by nothing at all — see
+     * TRACK_FROZEN_AFTER_MS. It catches a song that ended into something long and unannounced.
+     */
+    const val TRACK_HANDOVER_GRACE_MS = 60_000L
+
+    /**
      * How long one title may stay on screen *while playing* before it is treated as a frozen
      * injector and the display reverts to station branding.
      *

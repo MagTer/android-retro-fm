@@ -276,9 +276,13 @@ arrived at all (ABBA before a 278 s gap; Jennifer Rush before the car's 312 s ga
 marker means "the next song is queued", its absence is the news signal — and absence is only
 observable as a timeout from the track start, which puts us back at 312-versus-312.
 
-What it *can* do is catch "the song ended and nothing musical followed" — the one outlier in
-the sample, a 148 s stretch after Marvin Gaye's marker. Whether that is worth acting on needs
-more than one hour of samples; don't ship a display-blanking rule on fourteen points.
+What it *can* do is catch "the song ended and nothing musical followed", and that is what
+`TRACK_HANDOVER_GRACE_MS` does. The threshold comes from the shape of the distribution, not
+from taste: marker-to-next-title over 17 hand-overs is 3–14 s for fifteen of them, one at 25 s,
+**then nothing at all until 148 s**. 60 s sits in that empty band with 2.4× margin over the
+worst jingle. The intuition was 12 s and the data rejected it — three hand-overs exceed it, and
+the 25 s sample only surfaced in a second hour of listening, so the tail is not tightly known.
+When in doubt widen: blanking a song that is still playing is worse than a stale title.
 
 The capture that settled it is a ~40-line script: connect once with `Icy-MetaData: 1`, read
 `icy-metaint` bytes, read the length byte, print non-empty blocks with a timestamp. One

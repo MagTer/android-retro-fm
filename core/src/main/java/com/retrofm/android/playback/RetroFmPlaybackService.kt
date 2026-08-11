@@ -55,6 +55,9 @@ class RetroFmPlaybackService : MediaLibraryService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var lastAppliedTrack: TrackInfo? = null
     private var artworkJob: Job? = null
+
+    /** Armed by the mount's end-of-track marker; see [armHandoverTimeout]. */
+    private var handoverJob: Job? = null
     private var currentTrack: TrackInfo? = null
 
     /** Wall clock at which [currentTrack] became the displayed track; see the freeze check. */
@@ -431,6 +434,29 @@ class RetroFmPlaybackService : MediaLibraryService() {
     }
 
     /**
+     * The current track just announced itself again, which on this mount means it is ending.
+     * If no new title follows within the grace period, whatever is on air is not the song still
+     * named on screen — hand the display back to station branding.
+     *
+     * Measured, not guessed: see [RetroFmConfig.TRACK_HANDOVER_GRACE_MS]. Cancelled by the next
+     * real boundary, so a normal song change never reaches the timeout.
+     */
+    private fun armHandoverTimeout() {
+        handoverJob?.cancel()
+        handoverJob = serviceScope.launch {
+            delay(RetroFmConfig.TRACK_HANDOVER_GRACE_MS)
+            val current = currentTrack ?: return@launch
+            if (current.eventId <= 0 || adUntilElapsedMs != null) return@launch
+            Timber.tag("NowPlaying").i(
+                "no new title %d s after '%s' signalled its end — reverting to branding",
+                RetroFmConfig.TRACK_HANDOVER_GRACE_MS / 1000, current.title
+            )
+            lastAppliedTrack = null
+            applyTrackMetadata(TrackInfo.stationFallback())
+        }
+    }
+
+    /**
      * Drop back to station branding when one title has been on screen, while playing, for
      * longer than any real track — the injector has frozen and the display is lying.
      *
@@ -460,6 +486,9 @@ class RetroFmPlaybackService : MediaLibraryService() {
         playbackHeartbeatJob?.cancel()
         playbackHeartbeatJob = null
         lastAliveWallMs = System.currentTimeMillis()
+        // Nothing is on air, so an end-of-track marker from before the pause must not fire a
+        // branding swap into a stopped session — the idle path owns the display from here.
+        handoverJob?.cancel()
     }
 
     private inner class PlaybackStateListener : Player.Listener {
@@ -593,6 +622,15 @@ class RetroFmPlaybackService : MediaLibraryService() {
             }
             applyTrackMetadata(TrackInfo.stationFallback())
             return
+        }
+        if (track.eventId == currentTrack?.eventId) {
+            // The mount repeats the current title once, a few seconds before the next one —
+            // effectively an end-of-track marker (see RetroFmConfig.TRACK_HANDOVER_GRACE_MS).
+            // Arm the handover timer and let the rest of the boundary handling run: the repeat
+            // is also the second chance for an artwork lookup that failed the first time.
+            armHandoverTimeout()
+        } else {
+            handoverJob?.cancel()
         }
         // One lookup in flight at a time: a new boundary cancels the previous one, so a slow
         // response for a song that has already ended can't overwrite its successor.
