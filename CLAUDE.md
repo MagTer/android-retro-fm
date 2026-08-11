@@ -257,15 +257,28 @@ the clock is available. The threshold comes from listening to the mount directly
 **312 s**, so 8 min has a >50 % margin while still catching an injector stuck for days — the
 "always Talk Talk" failure that forced the migration.
 
-**Non-music is invisible, and no timeout will fix that.** During news, jingles and ads the mount
-emits *nothing* — not an empty `StreamTitle`, not "Nyheterna" — so the last song's title stays on
-screen through the bulletin. It is tempting to blank the display after N seconds of silence.
-Measured, that cannot work: the confirmed news episode held **312 s** and the longest legitimate
-song ("Piano Man") held **312 s**. The distributions do not overlap, they coincide. The
-re-announcement is no better — the mount repeats the current title once per track at an offset
-of 84–309 s, sometimes not at all, so "no repeat by now" fires mid-song too. Both heuristics
-were killed on 27 tracks of evidence; don't re-derive them from a smaller sample. If the station
-ever starts announcing non-music, use that signal instead.
+**Non-music is invisible.** During news, jingles and ads the mount emits *nothing* — not an
+empty `StreamTitle`, not "Nyheterna" — so the last song's title stays on screen through the
+bulletin.
+
+A plain silence timeout cannot fix that: the confirmed news episode held **312 s** and the
+longest legitimate song ("Piano Man") held **312 s**. Those do not merely overlap, they
+coincide.
+
+**But the re-announcement is a genuine end-of-track marker, and an earlier version of this note
+wrongly dismissed it.** Measuring it from the track's *start* gives a useless 84–309 s spread.
+Measured to the *next* title it is tight: **3–14 s in 13 of 14 samples** (2026-08-10 capture).
+The app already receives these blocks — they are the `icy boundary` lines followed by `apply
+skipped (dedup)`.
+
+What it cannot do is catch the news, because in every suspected news case the marker never
+arrived at all (ABBA before a 278 s gap; Jennifer Rush before the car's 312 s gap). If the
+marker means "the next song is queued", its absence is the news signal — and absence is only
+observable as a timeout from the track start, which puts us back at 312-versus-312.
+
+What it *can* do is catch "the song ended and nothing musical followed" — the one outlier in
+the sample, a 148 s stretch after Marvin Gaye's marker. Whether that is worth acting on needs
+more than one hour of samples; don't ship a display-blanking rule on fourteen points.
 
 The capture that settled it is a ~40-line script: connect once with `Icy-MetaData: 1`, read
 `icy-metaint` bytes, read the length byte, print non-empty blocks with a timestamp. One
