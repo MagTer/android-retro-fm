@@ -177,9 +177,13 @@ object ArtworkLookup {
                 val elapsed = System.currentTimeMillis() - startedAt
                 if (attempt < RetroFmConfig.ARTWORK_LOOKUP_ATTEMPTS) {
                     Timber.tag("Artwork").w(
-                        "lookup attempt %d failed for '%s' after %d ms: %s — retrying",
-                        attempt, term, elapsed, e.toString()
+                        "lookup attempt %d failed for '%s' after %d ms: %s — retrying in %d ms",
+                        attempt, term, elapsed, e.toString(), RetroFmConfig.ARTWORK_RETRY_DELAY_MS
                     )
+                    // The car's link is not usable again the instant this attempt gives up —
+                    // see RetroFmConfig.ARTWORK_RETRY_DELAY_MS for the three field cases where
+                    // a back-to-back retry burned itself in the same dead window.
+                    if (!pauseBeforeRetry()) return null
                     continue
                 }
                 Timber.tag("Artwork").w(
@@ -189,6 +193,19 @@ object ArtworkLookup {
             }
         }
         return null
+    }
+
+    /**
+     * Wait out [RetroFmConfig.ARTWORK_RETRY_DELAY_MS] before a retry. False when the wait was
+     * interrupted, which means whoever owns this thread wants it back — artwork is a nicety and
+     * gives up quietly.
+     */
+    private fun pauseBeforeRetry(): Boolean = try {
+        Thread.sleep(RetroFmConfig.ARTWORK_RETRY_DELAY_MS)
+        true
+    } catch (e: InterruptedException) {
+        Thread.currentThread().interrupt()
+        false
     }
 
     /**
@@ -283,25 +300,54 @@ object ArtworkLookup {
     }
 
     /**
-     * [normalize] plus a dropped leading definite article, for comparing artist names.
+     * [normalize] plus a dropped leading definite article and dropped join words, for comparing
+     * artist names.
      *
-     * The station and Apple disagree about "The" often enough to matter, and the mismatch is
-     * fatal rather than cosmetic: whole-word containment only searches for the wanted name
-     * inside the candidate's, so a wanted name that is *longer* by one word matches nothing.
-     * "The Four Tops – Loco In Acapulco" rejected all fifteen candidates, every one of them
-     * credited "Four Tops", and the car showed the station logo (field-reported 2026-08-10).
+     * Both removals exist because the mismatch is *fatal* rather than cosmetic: whole-word
+     * containment only searches for the wanted name inside the candidate's, so a wanted name
+     * that differs by one word matches nothing at all.
+     *
+     * - The article: "The Four Tops – Loco In Acapulco" rejected all fifteen candidates, every
+     *   one of them credited "Four Tops" (field-reported 2026-08-10).
+     * - The join: the station writes "Katrina & The Waves" and Apple writes "Katrina and the
+     *   Waves". `&` and `+` already collapse to whitespace in [normalize], so the *word* "and"
+     *   is the only surviving asymmetry — and it cost all fifteen candidates for "Walking On
+     *   Sunshine", including the self-titled album that was sitting at rank 1 (field-reported
+     *   2026-08-12). Dropping it on both sides makes every spelling of a joined credit compare
+     *   equal, which is also what keeps "Mike & The Mechanics" matching Apple's "Mike + The
+     *   Mechanics".
      */
     private fun artistKey(value: String): String =
-        normalize(value).removePrefix("the ")
+        normalize(value)
+            .removePrefix("the ")
+            .replace(CREDIT_JOIN_WORD, " ")
+            .trim()
+            .replace(WHITESPACE, " ")
 
     /** Lowercase, strip diacritics and punctuation, collapse whitespace. */
     private fun normalize(value: String): String =
-        Normalizer.normalize(value, Normalizer.Form.NFKD)
+        Normalizer.normalize(undot(value), Normalizer.Form.NFKD)
             .replace(COMBINING, "")
             .lowercase()
             .replace(NON_ALNUM, " ")
             .trim()
             .replace(WHITESPACE, " ")
+
+    /**
+     * Collapse a dotted acronym to its letters, so "U.S.A." and "USA" normalize alike.
+     *
+     * Punctuation otherwise becomes whitespace, which splits an acronym into single-letter
+     * words — and that is a mismatch, not a near miss. "Born In The USA" matched *only* the one
+     * candidate that spelled it without dots, a 1996 live recording on a bootleg-ish EP, while
+     * the actual album at rank 0 ("Born In the U.S.A.") was discarded; the car showed the wrong
+     * cover for the whole song (field-reported 2026-08-12).
+     *
+     * Deliberately narrow: it takes two or more letter-dot pairs in a row, so "Boney M." and
+     * "Mr. Big" are untouched, and it never removes an apostrophe — asymmetric apostrophes are
+     * a separate, unmeasured problem and should not be swept in here.
+     */
+    private fun undot(value: String): String =
+        value.replace(DOTTED_ACRONYM) { it.value.replace(".", "") }
 
     /** [normalize] plus the qualifiers Apple appends: "(feat. X)", "[Live]", "- Remastered". */
     private fun baseTitle(value: String): String =
@@ -312,6 +358,10 @@ object ArtworkLookup {
     private val WHITESPACE = Regex("\\s+")
     private val BRACKETED = Regex("\\(.*?\\)|\\[.*?]")
     private val DASH_QUALIFIER = Regex("\\s+-\\s+")
+    private val DOTTED_ACRONYM = Regex("(?:\\p{L}\\.){2,}")
+
+    /** The one join spelling [normalize] cannot flatten on its own. See [artistKey]. */
+    private val CREDIT_JOIN_WORD = Regex("\\band\\b")
 
     /** Joins between co-credited artists in a StreamTitle. See [leadArtist]. */
     private val CREDIT_SEPARATOR = Regex(

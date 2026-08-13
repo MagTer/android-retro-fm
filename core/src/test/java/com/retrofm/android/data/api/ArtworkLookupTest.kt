@@ -1,8 +1,10 @@
 package com.retrofm.android.data.api
 
 import com.retrofm.android.data.api.ArtworkLookup.SearchResult
+import com.retrofm.android.data.config.RetroFmConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -83,6 +85,41 @@ class ArtworkLookupTest {
             listOf(r("Four Tops", "Loco in Acapulco", "Indestructible"))
         )
         assertEquals("Indestructible", best?.collectionName)
+    }
+
+    /**
+     * "Katrina & The Waves – Walking On Sunshine" rejected all fifteen candidates and showed the
+     * logo (field-reported 2026-08-12). Apple spells the join as a word, and whole-word
+     * containment cannot bridge a differing word: `katrina the waves` is not a sublist of
+     * `katrina and the waves`. Order below is verbatim from the live API — rank 0 and 1 were
+     * both perfectly good covers.
+     */
+    @Test
+    fun `an ampersand join matches a candidate that spells it as a word`() {
+        val best = ArtworkLookup.pick(
+            "Katrina & The Waves", "Walking On Sunshine",
+            listOf(
+                r("Katrina and the Waves", "Walking On Sunshine", "Anthology"),
+                r("Katrina and the Waves", "Walking On Sunshine", "Katrina and the Waves"),
+                r("Katrina and the Waves", "Walking On Sunshine", "Feel-Good Jams", "Various Artists"),
+                r("Katrina and the Waves", "Walking On Sunshine", "Throwback Tunes: 80s", "Blandade Artister"),
+                r(
+                    "CARSTN, Katrina and the Waves & Agent Zed", "Walking on Sunshine",
+                    "Walking on Sunshine - Single"
+                )
+            )
+        )
+        assertEquals("Anthology", best?.collectionName)
+    }
+
+    /** Dropping the join word must not cost the matches that already worked. */
+    @Test
+    fun `a band whose name contains a join still matches either spelling`() {
+        val best = ArtworkLookup.pick(
+            "Mike & The Mechanics", "Over My Shoulder",
+            listOf(r("Mike + The Mechanics", "Over My Shoulder", "Beggar On a Beach of Gold"))
+        )
+        assertEquals("Beggar On a Beach of Gold", best?.collectionName)
     }
 
     @Test
@@ -211,6 +248,51 @@ class ArtworkLookupTest {
         assertEquals("What Is Love", best?.trackName)
     }
 
+    /**
+     * The car showed a 1996 live recording's EP cover for "Born In The USA" (field-reported
+     * 2026-08-12): punctuation becomes whitespace, so Apple's "U.S.A." split into three
+     * single-letter words and every studio entry was discarded — leaving the one candidate that
+     * happened to spell it without dots. Order below is verbatim from the live API; the album at
+     * rank 0 is the cover that belongs on screen.
+     */
+    @Test
+    fun `a dotted acronym matches its undotted spelling`() {
+        val best = ArtworkLookup.pick(
+            "Bruce Springsteen", "Born In The USA",
+            listOf(
+                r("Bruce Springsteen", "Born In the U.S.A.", "Born In the U.S.A."),
+                r("Bruce Springsteen", "Dancing In the Dark", "Born In the U.S.A."),
+                r("Bruce Springsteen", "Born in the U.S.A.", "Greatest Hits"),
+                r(
+                    "Bruce Springsteen",
+                    "Born in the U.S.A. (Live at Giants Stadium, E. Rutherford, NJ - 8/22/1985)",
+                    "The Born in the U.S.A. Tour '84 - '85"
+                ),
+                r(
+                    "Bruce Springsteen",
+                    "Born In the U.S.A. (Live at LA Coliseum, Los Angeles, CA - September 1985)",
+                    "Live / 1975-85", "Bruce Springsteen & The E Street Band"
+                ),
+                r(
+                    "Bruce Springsteen",
+                    "Born In the USA (Live at ICC SAAL 1, Berlin, Germany - April 1996)",
+                    "Missing EP"
+                )
+            )
+        )
+        assertEquals("Born In the U.S.A.", best?.collectionName)
+    }
+
+    /** Narrow on purpose: a lone abbreviating dot is not an acronym and must survive as a break. */
+    @Test
+    fun `a single trailing dot is not treated as an acronym`() {
+        val best = ArtworkLookup.pick(
+            "Boney M", "Rivers Of Babylon",
+            listOf(r("Boney M.", "Rivers of Babylon", "Nightflight to Venus"))
+        )
+        assertEquals("Nightflight to Venus", best?.collectionName)
+    }
+
     @Test
     fun `diacritics and punctuation do not block a match`() {
         val best = ArtworkLookup.pick(
@@ -251,5 +333,19 @@ class ArtworkLookupTest {
     @Test
     fun `an empty field yields no artwork rather than a guess`() {
         assertNull(ArtworkLookup.pick("Roxette", "It Must Have Been Love", emptyList()))
+    }
+
+    /**
+     * The retry only earns its request if it lands *after* the window that killed the first
+     * attempt. Three field cases (Four Tops 2026-08-10, The Corrs and Lynyrd Skynyrd
+     * 2026-08-11) had both attempts time out back to back, 8 s then 16 s from the same start,
+     * each within ~10 s of the link being reported up. A retry inside the connect timeout is
+     * one wasted request, not a second chance.
+     */
+    @Test
+    fun `the retry waits out the window that killed the first attempt`() {
+        assertTrue(
+            RetroFmConfig.ARTWORK_RETRY_DELAY_MS > RetroFmConfig.ARTWORK_CONNECT_TIMEOUT_MS
+        )
     }
 }

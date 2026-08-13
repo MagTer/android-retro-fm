@@ -194,6 +194,20 @@ started appearing in the log:
   Grease soundtrack, whose "John Travolta & Olivia Newton-John" then matches the full credit
   exactly. So a miss retries with `leadArtist`, and the candidates are still scored against
   the **full** credit — a narrower search must never lower the bar.
+- *The join spelled as a word.* Punctuation normalises to whitespace, so `&` and `+` already
+  agree — but Apple often writes it out. "Katrina & The Waves" is `katrina the waves` against
+  Apple's `katrina and the waves`, one word adrift, and all fifteen rows were rejected with the
+  self-titled album sitting at rank 1 (field-reported 2026-08-12). `artistKey` drops standalone
+  "and" on both sides, which is also what keeps "Mike & The Mechanics" matching Apple's
+  "Mike + The Mechanics".
+
+**A dotted acronym is a mismatch, not a near miss — and it produces a *wrong* cover, not a
+logo.** Punctuation becoming whitespace splits "U.S.A." into three single-letter words, so
+"Born In The USA" discarded Apple's actual album at rank 0 and matched the one candidate that
+spelled it without dots: a 1996 Berlin live recording on a "Missing EP" (field-reported
+2026-08-12). `normalize` collapses two or more letter-dot pairs in a row and nothing else — it
+leaves "Boney M." and "Mr. Big" alone, and deliberately does not touch apostrophes, since
+asymmetric apostrophes ("Ain't" vs "Aint") are a separate problem nothing has measured yet.
 
 Known and deliberately unfixed: **the station's own typos.** "Starship – We Build This City"
 finds nothing because the song is "We *Built* This City". Fuzzy title matching would fix one
@@ -205,6 +219,11 @@ Three habits worth keeping: **log the album, not just the track** (the old line 
 ranking change instead of reasoning about the scoring — `entity=song&limit=15` is cheap and a
 whole drive fits in one pass, and it is what killed the track-count idea; and treat **any
 API string that Apple localises as unusable for logic** — `country=SE` is on every request.
+
+That replay has a measured rate limit: 41 queries at 1.2 s spacing earned a **429** on the
+42nd (2026-08-12). Space a corpus replay several seconds apart, and if one does trip, wait it
+out rather than retrying — the app's own budget is one request per track boundary, and a
+diagnostic must not be what teaches Apple to throttle this client.
 
 **Transport failures must not be cached.** A miss is cached only when the API actually answered.
 Caching a boot-time connection failure would poison that song for the whole process — the car
@@ -228,9 +247,20 @@ exactly the 8 s connect timeout. So the 20 s ceiling is not what bites; the conn
 
 **Only the first lookup of a playback session fails.** All three failures were the first track
 after playback started — the modem is warm for the audio stream but cold for a new host, and
-nothing else pays that cost. Hence `ARTWORK_LOOKUP_ATTEMPTS = 2`: one immediate retry, which
-the data says lands in under a second. Do not raise it — a third attempt would be pressing an
-API that is plainly unreachable.
+nothing else pays that cost. Hence `ARTWORK_LOOKUP_ATTEMPTS = 2`. Do not raise it — a third
+attempt would be pressing an API that is plainly unreachable.
+
+**But an *immediate* retry is a wasted request, and this note used to claim the opposite.** It
+was added believing the second attempt would land in under a second, since only the first pays
+a cold path. Three field cases since say no: Four Tops (2026-08-10), The Corrs and Lynyrd
+Skynyrd (2026-08-11, 1.0.51–1.0.53) — **3 of 3 retries also timed out**, each pair reading
+8 s then 16 s from the same lookup start. Every one began within ~10 s of a `network available`
+callback, so the head unit reports the link up well before it can carry a fresh DNS + TCP + TLS
+to a host outside the pool, and both attempts spent themselves inside that same dead window.
+`ARTWORK_RETRY_DELAY_MS` (15 s) puts the second attempt past it; worst case is ~31 s against a
+3–4 min track and the display never waits. What used to rescue these songs was the mount's
+re-announcement re-running the lookup minutes later — that is the "artwork appears just as the
+song ends" symptom, not a second chance worth designing around.
 
 **The mount re-announces a title mid-track.** Confirmed 2026-08-09: the same `StreamTitle`
 arrives again 50–90 s into a song (`apply skipped (dedup)` when the metadata is unchanged).

@@ -111,11 +111,30 @@ object RetroFmConfig {
      *
      * Those songs did eventually get their cover — but only because the mount re-announces a
      * title mid-track, which re-ran the lookup ~3 minutes later. That is what "the artwork
-     * appears just as the song ends, during the jingle" was. A second attempt costs one extra
-     * request on a path that has just failed, and the evidence says it lands in under a second.
-     * Two is the cap: a third would be pressing an API that is clearly unreachable.
+     * appears just as the song ends, during the jingle" was. Two is the cap: a third would be
+     * pressing an API that is clearly unreachable.
      */
     const val ARTWORK_LOOKUP_ATTEMPTS = 2
+
+    /**
+     * How long the second attempt waits before it tries. **Not a politeness backoff — the
+     * failure it exists for lasts longer than an immediate retry does.**
+     *
+     * The retry was added believing it would land in under a second, on the reasoning that only
+     * the first request pays a cold path. Three field cases since (Four Tops 2026-08-10, The
+     * Corrs and Lynyrd Skynyrd 2026-08-11, versions 1.0.51–1.0.53) say otherwise: **3 of 3
+     * retries also timed out**, each pair reading 8 s then 16 s from the same lookup start. Every
+     * one began within ~10 s of a `network available` callback, so the head unit reports the link
+     * up well before it can carry a fresh DNS + TCP + TLS to a host that is not in the pool, and
+     * both attempts spent themselves inside that same dead window.
+     *
+     * 15 s puts the retry outside it while staying far inside a song: worst case is
+     * connect + delay + connect ≈ 31 s against a 3–4 min track, and the display never waits —
+     * ARTWORK_FIRST_APPLY_BUDGET_MS published the title at 1.5 s and the cover upgrades late.
+     * Note that the failure line's elapsed time now includes this pause; the per-attempt numbers
+     * are what to read for transport health.
+     */
+    const val ARTWORK_RETRY_DELAY_MS = 15_000L
 
     /**
      * How long an idle connection to the artwork API is kept for reuse. Longer than OkHttp's
