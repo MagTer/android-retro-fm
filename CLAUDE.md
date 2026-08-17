@@ -14,8 +14,18 @@ PATH on the dev host):
 ```bash
 export JAVA_HOME=~/.local/jdk/jdk-17.0.19+10   # dev host location
 export ANDROID_HOME=~/android-sdk
+./gradlew :core:testDebugUnitTest              # verification — run before and after a change
 ./gradlew :app:bundleRelease :automotive:bundleRelease
 ```
+
+- **`:core:testDebugUnitTest` is the whole test suite** and it is JVM-only. It does not run in
+  CI — `.github/workflows/release.yml` builds bundles and nothing else — so a green suite is
+  only as good as the last local run. Gradle marks it `UP-TO-DATE` and skips it when nothing
+  changed; pass `--rerun` when you need the run itself as evidence.
+- It covers the pure logic only: artwork ranking, StreamTitle parsing, the browse tree, the
+  artwork host allowlist, the freeze clock. `RetroFmPlaybackService` has **no** test harness, so
+  anything that matters inside it belongs in an extracted class (that is why `TrackPlayingClock`
+  exists) or it is untested.
 
 - The Gradle heap is capped at `-Xmx2g` in `gradle.properties` — **do not raise it**; a 4g heap
   OOM-killed the whole session on this 5.8 GB host (swap has since been added, but keep the cap).
@@ -304,6 +314,15 @@ the clock is available. The threshold comes from listening to the mount directly
 **312 s**, so 8 min has a >50 % margin while still catching an injector stuck for days — the
 "always Talk Talk" failure that forced the migration.
 
+**The clock it spends is *playing* time, not wall clock** (`TrackPlayingClock`, driven from
+`isPlaying` by the playback heartbeat). Wall clock was wrong and shipped that way: the car's
+modem stalls the stream for minutes mid-song, and on 2026-08-15 a 3.5 min rebuffer inside
+"Black Velvet" logged `metadata frozen — held 492 s` against the 480 s threshold and blanked a
+title that was correct, one second before the next one arrived. A stalled stream is not a
+frozen injector — a frozen injector freezes while the audio keeps playing, so it still trips.
+`TrackPlayingClockTest` replays that case; the service itself has no test harness, so the
+accounting lives in that class deliberately.
+
 **Non-music is invisible.** During news, jingles and ads the mount emits *nothing* — not an
 empty `StreamTitle`, not "Nyheterna" — so the last song's title stays on screen through the
 bulletin.
@@ -324,17 +343,33 @@ marker means "the next song is queued", its absence is the news signal — and a
 observable as a timeout from the track start, which puts us back at 312-versus-312.
 
 What it *can* do is catch "the song ended and nothing musical followed", and that is what
-`TRACK_HANDOVER_GRACE_MS` does. Marker-to-next-title over 17 hand-overs is 3–14 s for fifteen
-of them, one at 25 s, **then nothing at all until 148 s**. The value is **15 s** — a maintainer
-decision taken inside the observed range rather than above it, trading one early blank in
-sixteen hand-overs (the 25 s outlier, ~10 s of logo) for reacting 45 s sooner on a real
-interruption. Raise it toward 30 s if the car ever shows the logo flashing between ordinary
-songs; that still catches everything worth catching.
+`TRACK_HANDOVER_GRACE_MS` does. The value is the empty band in the marker-to-next-title
+distribution, and **the band moved once a week of field logs replaced the first capture.**
 
-The capture that settled it is a ~40-line script: connect once with `Icy-MetaData: 1`, read
-`icy-metaint` bytes, read the length byte, print non-empty blocks with a timestamp. One
-listener connection, no polling — the polite way to ask this mount a question, and far better
-evidence than inferring cadence from the car's log.
+- 2026-08-10/11, 17 hand-overs from a direct mount capture: 3–14 s for fifteen, one at 25 s,
+  then nothing until 148 s. 15 s was chosen inside the jingle range on that evidence.
+- 2026-08-13→17, **109 hand-overs from the car on 1.0.54**: 83 at 3–13 s, 22 at 15–25 s, then
+  **nothing between 25 s and 32 s**, then 32, 43, 54, 61, 71, 83, 105, 131, 143 s.
+
+15 s sat in the middle of the jingle range and it was field-visible: **16 of 30 branding
+reverts had the next title arrive 1–12 s later** — the logo blinking between two ordinary
+songs, shortest 0.98 s (2026-08-15 09:30:24). **The value is now 30 s**, inside the new empty
+band; it removes 13 of those 22 reverts and still catches all 9 real interruptions (≥32 s),
+paying 30 s of stale title instead of 15 s when the interruption is real.
+
+Re-measure the band before touching it again — twice now the distribution has been the whole
+argument, and the second one contradicted the first. The samples are already in the field logs
+as `icy boundary` followed by `apply skipped (dedup)`; the earlier capture is a ~40-line script
+that connects once with `Icy-MetaData: 1`, reads `icy-metaint` bytes, reads the length byte and
+prints non-empty blocks with a timestamp. One listener connection, no polling.
+
+**Known and unfixed: the marker is not always the end of the track.** The mount re-announces a
+title 1–5 times, usually 150–290 s in, but sometimes at +7 s. Six times in that week the
+display went song → logo → *the same song again* (Imagine, 2026-08-15 09:03: announced at
++0, +7, +30 and +71 s, blanked at +22 s, restored at +30 s). `All Out Of Love` was announced
+four times in nine seconds. A guard that only arms the timer when the marker arrives ≥60 s into
+the track would cover every observed case — the earliest *last* marker in the week is 28 s —
+but it is not implemented.
 
 ### retrofm.se: dead ends, so nobody re-runs them (probed 2026-08-08)
 

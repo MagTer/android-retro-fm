@@ -60,8 +60,12 @@ class RetroFmPlaybackService : MediaLibraryService() {
     private var handoverJob: Job? = null
     private var currentTrack: TrackInfo? = null
 
-    /** Wall clock at which [currentTrack] became the displayed track; see the freeze check. */
-    private var currentTrackAppliedWallMs: Long? = null
+    /**
+     * How long [currentTrack] has been displayed *while audio was playing*. Driven by the
+     * playback heartbeat, so a rebuffer or a pause contributes nothing — see
+     * [maybeHandleFrozenMetadata] and [TrackPlayingClock] for why that distinction is the point.
+     */
+    private val trackClock = TrackPlayingClock()
     private var adUntilElapsedMs: Long? = null
     private var adUnmuteJob: Job? = null
     private var adCountdownJob: Job? = null
@@ -190,11 +194,10 @@ class RetroFmPlaybackService : MediaLibraryService() {
 
         playerManager.updateMediaItem(buildStationItem(track))
 
-        // Stamped only when the track itself changes, so the artwork's second apply does not
-        // restart the freeze clock (see maybeHandleFrozenMetadata). Wall clock, not uptime:
-        // the car suspends to RAM and uptime stands still while it does.
+        // Restarted only when the track itself changes, so the artwork's second apply does not
+        // restart the freeze clock (see maybeHandleFrozenMetadata).
         if (track.eventId != currentTrack?.eventId) {
-            currentTrackAppliedWallMs = System.currentTimeMillis()
+            trackClock.restart()
         }
 
         // Live browse tile: the station's browse representation mirrors the current track,
@@ -424,9 +427,13 @@ class RetroFmPlaybackService : MediaLibraryService() {
 
     private fun startPlaybackHeartbeat() {
         if (playbackHeartbeatJob?.isActive == true) return
+        // Start the track clock from now, not from whenever it last stopped: the gap in
+        // between is exactly the stalled time that must not count. See maybeHandleFrozenMetadata.
+        trackClock.start()
         playbackHeartbeatJob = serviceScope.launch {
             while (isActive) {
                 lastAliveWallMs = System.currentTimeMillis()
+                trackClock.tick()
                 maybeHandleFrozenMetadata()
                 delay(RetroFmConfig.PLAYBACK_HEARTBEAT_MS)
             }
@@ -465,14 +472,20 @@ class RetroFmPlaybackService : MediaLibraryService() {
      * cannot tell a frozen injector from a very long block, so the threshold sits far above
      * anything observed (see [RetroFmConfig.TRACK_FROZEN_AFTER_MS]).
      *
+     * "While playing" is the load-bearing half, and [TrackPlayingClock] is what makes it true:
+     * the budget is time the player was actually playing, not wall clock since the title was
+     * applied. The car's modem stalls the stream for minutes at a time mid-song, and wall clock
+     * made a 3.5 min rebuffer inside "Black Velvet" read as a frozen injector on 2026-08-15
+     * (492 s against the 480 s threshold), blanking a title that was correct one second before
+     * the next one arrived. A frozen injector still trips this: it freezes while audio plays.
+     *
      * It does **not** solve the news bulletin, and no timeout can — see the config comment.
      */
     private fun maybeHandleFrozenMetadata() {
         val current = currentTrack ?: return
         if (current.eventId <= 0) return // already branding, or an ad
         if (adUntilElapsedMs != null) return
-        val appliedAt = currentTrackAppliedWallMs ?: return
-        val heldMs = System.currentTimeMillis() - appliedAt
+        val heldMs = trackClock.playingMs
         if (heldMs < RetroFmConfig.TRACK_FROZEN_AFTER_MS) return
         Timber.tag("NowPlaying").w(
             "metadata frozen — '%s' held %d s while playing, reverting to branding",
@@ -485,6 +498,9 @@ class RetroFmPlaybackService : MediaLibraryService() {
     private fun stopPlaybackHeartbeat() {
         playbackHeartbeatJob?.cancel()
         playbackHeartbeatJob = null
+        // Bank what was played up to the stall, then stop the clock: everything from here until
+        // audio returns is stalled time and must not count towards the freeze budget.
+        trackClock.stop()
         lastAliveWallMs = System.currentTimeMillis()
         // Nothing is on air, so an end-of-track marker from before the pause must not fire a
         // branding swap into a stopped session — the idle path owns the display from here.

@@ -256,28 +256,41 @@ object RetroFmConfig {
      * song is ending, before handing back to station branding.
      *
      * The mount repeats the current `StreamTitle` once shortly before the next one — an
-     * end-of-track marker in all but name. Measured from marker to next title across 17
-     * transitions (2026-08-10/11 captures): **3, 4, 6, 6, 7, 7, 7, 8, 8, 8, 8, 8, 11, 12, 14,
-     * 25 s — then nothing until 148 s.** That empty band between 25 s and 148 s is the whole
-     * basis for this number.
+     * end-of-track marker in all but name. The number is the empty band in the marker-to-next-
+     * title distribution, and the band moved once a real week of field logs replaced the
+     * original 17-transition capture.
      *
-     * 15 s is a deliberate choice *inside* the observed jingle range rather than above it
-     * (maintainer's call, 2026-08-11, made with the distribution in hand). It clears fifteen of
-     * the seventeen hand-overs, so the known cost is the 25 s outlier: roughly one hand-over in
-     * sixteen shows branding for ten seconds before the next title lands. Bought with that: the
-     * display stops lying 45 s sooner on a real interruption. The alternative considered was
-     * 60 s, sitting in the empty band with no early blanking at all but a full minute of stale
-     * title. If field use shows the logo flashing between ordinary songs, this is the number to
-     * raise — 30 s still catches everything worth catching.
+     * **Measured over 109 hand-overs on 1.0.54 (car, 2026-08-13 → 08-17, 7 h 21 min):**
+     * 83 samples at 3–13 s, 22 more at 15–25 s, then **nothing between 25 s and 32 s**, then
+     * 32, 43, 54, 61, 71, 83, 105, 131, 143 s. The 2026-08-10/11 capture (17 samples) saw the
+     * band as 25 s → 148 s and 15 s was chosen inside the jingle range on that basis; with
+     * 6× the sample the jingle range plainly reaches 25 s and 15 s sits in the middle of it.
+     *
+     * The cost of 15 s was field-visible and is what this value fixes: **16 of 30 branding
+     * reverts had the next title arrive 1–12 s later**, i.e. the logo blinked between two
+     * ordinary songs (shortest 0.98 s, 2026-08-15 09:30:24). 30 s sits in the empty band and
+     * removes 13 of those 22 reverts while leaving all 9 real interruptions (≥32 s) caught.
+     * Paid for it: 30 s of stale title instead of 15 s when the interruption is real.
+     *
+     * If the logo ever starts flashing between ordinary songs again, re-measure the band from
+     * the `icy boundary` / `apply skipped (dedup)` pairs in the field logs rather than nudging
+     * this — twice now the distribution has been the whole argument.
      *
      * This does **not** catch the news bulletin, which is announced by nothing at all — see
      * TRACK_FROZEN_AFTER_MS. It catches a song that ended into something long and unannounced.
      */
-    const val TRACK_HANDOVER_GRACE_MS = 15_000L
+    const val TRACK_HANDOVER_GRACE_MS = 30_000L
 
     /**
      * How long one title may stay on screen *while playing* before it is treated as a frozen
      * injector and the display reverts to station branding.
+     *
+     * "While playing" is literal: the budget is consumed only by time the player is actually
+     * playing audio, not by wall clock. It used to be wall clock from the moment the title was
+     * applied, and a 3.5 min rebuffer inside one song was enough to trip it — 2026-08-15
+     * 09:25:14 logged `metadata frozen — 'Black Velvet' held 492 s` for a title that was
+     * correct the whole time, and the next real title arrived one second after the blank.
+     * A stalled stream is not a frozen injector; it is a stalled stream.
      *
      * This is the defence that did not exist when Bauer's relay froze on 2026-07-31 and the app
      * showed "Talk Talk – It's My Life" for a week — the failure that started the whole
