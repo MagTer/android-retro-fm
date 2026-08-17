@@ -168,6 +168,145 @@ class ArtworkLookupTest {
         assertEquals("Love Songs", best?.collectionName)
     }
 
+    /**
+     * Field case 2026-08-15: the car showed an all-star tribute concert's cover for
+     * "Islands In The Stream". The station credits the duet "Kenny Rogers + Dolly Parton";
+     * Apple credits the studio recording to "Dolly Parton & Kenny Rogers" on every row but one,
+     * and whole-word containment is ordered, so all six were discarded — leaving the single
+     * "Kenny Rogers & Dolly Parton" row, a live all-star concert. Order verbatim from the API.
+     */
+    @Test
+    fun `a duet credited in the other order is the same act`() {
+        val best = ArtworkLookup.pick(
+            "Kenny Rogers + Dolly Parton", "Islands In The Stream",
+            listOf(
+                r("Dolly Parton & Kenny Rogers", "Islands In the Stream", "Ultimate Dolly Parton", "Dolly Parton"),
+                r("Dolly Parton & Kenny Rogers", "Islands in the Stream", "Dolly", "Dolly Parton"),
+                r("Dolly Parton & Kenny Rogers", "Islands In the Stream", "Greatest Hits", "Dolly Parton"),
+                r("Dolly Parton & Kenny Rogers", "Islands In the Stream", "The Essential Dolly Parton", "Dolly Parton"),
+                r("Dolly Parton & Kenny Rogers", "Islands In the Stream", "Holiday Summer Mix", "Summer Hits"),
+                r("Dolly Parton & Kenny Rogers", "Islands In the Stream", "Les 100 plus grands titres Country", "Various Artists"),
+                r("Kenny Rogers & Dolly Parton", "Islands In The Stream (Live)", "Kenny Rogers: All In For The Gambler – All-Star Concert Celebration (Live)", "Various Artists"),
+                r("The Shires", "Islands in the Stream", "Brave (Deluxe)")
+            )
+        )
+        assertEquals("Ultimate Dolly Parton", best?.collectionName)
+    }
+
+    /**
+     * Accepting the swapped credit must not hand the pick to a live take. "Rufus and Chaka
+     * Khan" now scores as the same act as the station's "Chaka Khan + Rufus", and its row is a
+     * live album that ranks above the studio one — the rendition term is what keeps it out.
+     * Order verbatim from the API.
+     */
+    @Test
+    fun `the swapped credit does not open the door to a live take`() {
+        val best = ArtworkLookup.pick(
+            "Chaka Khan + Rufus", "Ain't Nobody",
+            listOf(
+                r("Chaka Khan", "Ain't Nobody", "Epiphany: The Best of Chaka Khan, Vol. 1"),
+                r("Rufus and Chaka Khan", "Ain't Nobody (Live)", "Stompin' at The Savoy (Live)"),
+                r("Chaka Khan & Rufus", "Ain't Nobody", "MILESTONES", "Various Artists"),
+                r("Chaka Khan & Rufus", "Ain't Nobody", "100 beste festlåter", "Various Artists")
+            )
+        )
+        assertEquals("MILESTONES", best?.collectionName)
+    }
+
+    /**
+     * Field case 2026-08-15: "Ultimate Berlin Live" on screen for the Top Gun ballad. It is the
+     * only row that is both plain-titled and an own release, so it beat everything on `own`.
+     *
+     * What this test does *not* claim: that the Top Gun soundtrack at rank 0 wins. It cannot —
+     * it is credited "Various Artists" like any hits compilation, and the only field that names
+     * a soundtrack (`primaryGenreName`) is localised by `country=SE`, so it is unusable for
+     * logic. Ranking Apple's own order above `own` would reach it, and replaying the 123-track
+     * corpus showed that wrecking 34 picks. See the note in ArtworkLookup.pick.
+     */
+    @Test
+    fun `a live album never beats the record being played`() {
+        val best = ArtworkLookup.pick(
+            "Berlin", "Take My Breath Away",
+            listOf(
+                r("Berlin", "Take My Breath Away (Love Theme from \"Top Gun\")", "Top Gun (Original Motion Picture Soundtrack) [Special Expanded Edition]", "Various Artists"),
+                r("Berlin", "Take My Breath Away (Love Theme from \"Top Gun\")", "Anos 80 - Nostalgia Internacionais", "Various Artists"),
+                r("Berlin", "Take My Breath Away (Love Theme from \"Top Gun\")", "Movie Hits", "Various Artists"),
+                r("Berlin", "Take My Breath Away (Love Theme from \"Top Gun\")", "Power Ballads: All Out of Love", "Various Artists"),
+                r("Berlin", "Take My Breath Away (Re-Recorded)", "Take My Breath Away (Re-Recorded Versions) - Single"),
+                r("Berlin", "Take My Breath Away (as heard in Top Gun) (Re-Recorded / Remastered)", "Take My Breath Away (as heard in Top Gun) (Re-Recorded / Remastered)"),
+                r("Berlin", "Take My Breath Away (Love Theme from \"Top Gun\")", "Love Songs", "Various Artists"),
+                r("Berlin", "Take My Breath Away", "Ultimate Berlin Live"),
+                r("Berlin", "Take My Breath Away (Live)", "Live: Sacred & Profane"),
+                r("Berlin", "Take My Breath Away (Love Theme From \"Top Gun\")", "Die Hit Giganten - Film Hits", "Various Artists"),
+                r("Berlin", "Take My Breath Away (Main Version)", "Take My Breath Away"),
+                r("Berlin", "Take My Breath Away (Orchestral Version)", "Strings Attached")
+            )
+        )
+        assertEquals("Take My Breath Away", best?.collectionName)
+    }
+
+    /**
+     * Field case 2026-08-14: a "(Re-Recorded / Remastered)" single sleeve for "Maniac". Same
+     * shape as the Berlin case — the re-recording is the artist's own release and the real
+     * recording sits on soundtracks and compilations. Order verbatim from the API.
+     */
+    @Test
+    fun `a re-recording never beats the record being played`() {
+        val best = ArtworkLookup.pick(
+            "Michael Sembello", "Maniac",
+            listOf(
+                r("Michael Sembello", "Maniac", "Flashdance (Original Soundtrack from the Motion Picture)", "Various Artists"),
+                r("Michael Sembello", "Maniac (Flashdance Version) (Re-Recorded / Remastered)", "Maniac (Flashdance Version) (Re-Recorded / Remastered)"),
+                r("Michael Sembello", "Maniac (New Version)", "The Lost Years"),
+                r("Michael Sembello", "Maniac", "Classic 80s Movie Songs", "Various Artists"),
+                r("Michael Sembello", "Maniac (Album Version) (Re-Recorded / Remastered)", "Maniac (Flashdance Version) (Re-Recorded / Remastered)"),
+                r("Michael Sembello", "Maniac", "80's Hits Night", "Various Artists"),
+                r("Michael Sembello", "Maniac (Re-Recorded)", "Maniac (Re-Recorded) - Single")
+            )
+        )
+        assertEquals("The Lost Years", best?.collectionName)
+    }
+
+    /**
+     * The rendition test reads bracketed qualifiers and the release title, never the bare track
+     * name — "Live Is Life" and "Living In A Box" are songs, and demoting them would cost a
+     * correct cover to fix nothing. Both are real 1.0.54 tracks.
+     */
+    @Test
+    fun `a song whose title contains live is not a rendition`() {
+        assertEquals(
+            "Millennium Edition",
+            ArtworkLookup.pick(
+                "Opus", "Live Is Life",
+                listOf(
+                    r("Opus", "Live Is Life", "Millennium Edition"),
+                    r("Opus", "Live Is Life (Live)", "Live At The Stadthalle")
+                )
+            )?.collectionName
+        )
+        assertEquals(
+            "Living In A Box",
+            ArtworkLookup.pick(
+                "Living in a box", "Living in a box",
+                listOf(r("Living In a Box", "Living In A Box", "Living In A Box"))
+            )?.collectionName
+        )
+    }
+
+    /** A remaster is the original recording, so it is not demoted. */
+    @Test
+    fun `a remaster is not a rendition`() {
+        val best = ArtworkLookup.pick(
+            "Maggie Reilly", "Everytime we touch",
+            listOf(
+                r("Maggie Reilly", "Everytime We Touch (Radio Mix Remastered)",
+                    "Everytime We Touch (Remastered) - Single"),
+                r("Maggie Reilly", "Everytime We Touch (Live)", "Live In Concert")
+            )
+        )
+        assertEquals("Everytime We Touch (Remastered) - Single", best?.collectionName)
+    }
+
     /** Artist agreement still outranks the compilation signal. */
     @Test
     fun `an own-release by the wrong artist never beats the right artist`() {

@@ -236,6 +236,34 @@ spelled it without dots: a 1996 Berlin live recording on a "Missing EP" (field-r
 leaves "Boney M." and "Mr. Big" alone, and deliberately does not touch apostrophes, since
 asymmetric apostrophes ("Ain't" vs "Aint") are a separate problem nothing has measured yet.
 
+**A duet is one act however it is billed — and the comparison below the top tier is ordered.**
+The station announced "Kenny Rogers + Dolly Parton"; Apple credits the studio recording to
+"Dolly Parton & Kenny Rogers" on six rows and to "Kenny Rogers & Dolly Parton" on exactly one —
+an all-star tribute concert, which was therefore the only candidate that scored at all and the
+cover the car showed (field-reported 2026-08-15). Whole-word containment needs the wanted name
+to appear as a *run* inside the candidate's, so a swapped credit matches nothing. `sameCredit`
+compares the two artist keys as word multisets and scores in the same tier as an exact match.
+
+**A re-recording or a live take must never outrank the real record** (`SearchResult.isRendition`,
+ranked above `ownRelease`). "The artist's own release" was doing exactly that: 1.0.54 put
+"Ultimate Berlin Live" on *Take My Breath Away* and a "(Re-Recorded / Remastered)" single sleeve
+on *Maniac*, because in both cases the real recording only exists on soundtracks and
+compilations — `ownRelease = false` — while the re-recording is the artist's own. The test reads
+the track's **bracketed qualifiers and the release title only**, never the bare track name:
+"Live Is Life", "Living In A Box" and "Live and Let Die" are songs. Remasters are deliberately
+not renditions — a remaster is the original recording.
+
+**Still unfixed, and it is the soundtrack case:** the Top Gun and Flashdance covers are the
+right ones for those two songs, and they are unreachable. A soundtrack is legitimately credited
+"Various Artists", so `ownRelease` cannot tell it from a hits montage. The only field that names
+one is `primaryGenreName` ("Soundtracks"), and it is **measurably localised** — the same
+`country=SE` response set carries "Hårdrock", "Musikaler", "Alternativt" and "Barnmusik" — so it
+falls under the rule below. The reachable alternative, ranking Apple's own order above
+`ownRelease`, was replayed and **rejected: 34 of 123 picks move and most are regressions**
+("Pop Heroes", "Rockklassiker Vol. 2", "80s 100 Hits", "Millennium Party", "Stranger Things
+Remix", a dozen remasters and live takes). What shipped instead demotes the rendition, which
+gets the *wrong* cover off the screen without reaching the right one.
+
 Known and deliberately unfixed: **the station's own typos.** "Starship – We Build This City"
 finds nothing because the song is "We *Built* This City". Fuzzy title matching would fix one
 sample and put a wrong cover on who knows how many others; leave it until the log shows a
@@ -246,6 +274,18 @@ Three habits worth keeping: **log the album, not just the track** (the old line 
 ranking change instead of reasoning about the scoring — `entity=song&limit=15` is cheap and a
 whole drive fits in one pass, and it is what killed the track-count idea; and treat **any
 API string that Apple localises as unusable for logic** — `country=SE` is on every request.
+
+The replay is worth doing properly, because it has now overturned a design twice. Fetch every
+distinct `artist title` the logs show **once** into a file, then judge every scoring variant
+offline against that file — a variant costs nothing to evaluate after the fetch, and the fetch
+is the only thing that touches Apple. 123 tracks at 5 s spacing is ~10 min and drew no 429.
+Two things that only showed up that way, on the very change described above: a set-equality
+artist tier looked free and silently regressed *Ain't Nobody* to a live album until the
+rendition term was added in the same commit, and "trust Apple's rank" looked obviously right
+and moved 34 picks. Also expect **two or three picks to differ from what the log recorded** for
+reasons that are not yours: where two candidates tie on every term, `-index` decides, and Apple
+reorders between then and now (seen on Queen and Rick Astley, 2026-08-17). A tiebreak resting
+on Apple's ordering is not reproducible — do not chase those as bugs.
 
 That replay has a measured rate limit: 41 queries at 1.2 s spacing earned a **429** on the
 42nd (2026-08-12). Space a corpus replay several seconds apart, and if one does trip, wait it

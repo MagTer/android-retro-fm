@@ -61,6 +61,26 @@ object ArtworkLookup {
         val ownRelease: Boolean
             get() = collectionArtistName.isNullOrBlank() ||
                 normalize(collectionArtistName) == normalize(artistName)
+
+        /**
+         * True when this row is a live take, a remix or a re-recording rather than the record
+         * the station is playing.
+         *
+         * Ranked above [ownRelease] in [pick], because "the artist's own release" was happily
+         * picking a re-recording over the original: the car showed "Ultimate Berlin Live" for
+         * *Take My Breath Away* and a "(Re-Recorded / Remastered)" single sleeve for
+         * *Maniac* (both field-visible on 1.0.54, 2026-08-13→17). A compilation of the real
+         * recording is a better cover than a pristine sleeve for a different performance.
+         *
+         * Read from the track's **bracketed qualifiers only** plus the release title — never
+         * the bare track name. "Live Is Life", "Living In A Box" and "Live and Let Die" are
+         * songs, and matching `live` across the whole title would demote all three. Remasters
+         * are deliberately absent: a remaster is the original recording.
+         */
+        val isRendition: Boolean
+            get() = RENDITION.containsMatchIn(
+                BRACKETED.findAll(trackName).joinToString(" ") { it.value }
+            ) || RENDITION.containsMatchIn(collectionName.orEmpty())
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -244,7 +264,10 @@ object ArtworkLookup {
 
             val gotArtist = artistKey(candidate.artistName)
             val artistScore = when {
-                gotArtist == wantArtist -> 3
+                // Same tier for a credit spelled in the other order: the station writes
+                // "Kenny Rogers + Dolly Parton" and Apple credits the same duet as "Dolly
+                // Parton & Kenny Rogers". See sameCredit.
+                gotArtist == wantArtist || sameCredit(gotArtist, wantArtist) -> 3
                 // "Kylie Minogue & Jason Donovan" when the stream credited only the first name.
                 gotArtist.startsWith("$wantArtist ") -> 2
                 // Duets the other way round: "George Michael & Aretha Franklin" for "Aretha
@@ -262,6 +285,11 @@ object ArtworkLookup {
 
             // Prefer the plain single over live/remix/version entries when both qualify.
             val plain = if (candidate.trackName.contains('(') || candidate.trackName.contains('[')) 0 else 1
+            // Above `own`, because "the artist's own release" was picking re-recordings and
+            // live albums over the real record — see SearchResult.isRendition for the two
+            // field cases. Replaying the whole 1.0.54 corpus (123 tracks) moved three picks
+            // and regressed none.
+            val original = if (candidate.isRendition) 0 else 1
             // Above `plain`, because a compilation cover is wrong in a way a "(Radio Mix)"
             // suffix is not: it shows an unrelated montage instead of the album. Field case
             // 2026-08-09 — "Take That / Back For Good" returned fifteen candidates that ALL
@@ -274,7 +302,14 @@ object ArtworkLookup {
             // Status Quo to a live album, Clapton to a soundtrack, Louis Armstrong to a
             // Christmas record, Madonna and Tina Turner to singles. Measure before adding a
             // dimension that merely sounds reasonable.
-            val score = listOf(artistScore, titleScore, own, plain, -index)
+            //
+            // Also deliberately NOT here: Apple's own ranking above `own`. It looks attractive
+            // because rank 0 is right in exactly the cases `own` gets wrong (the Top Gun and
+            // Flashdance soundtracks). Replaying the 123-track corpus says no — it moves 34
+            // picks and most are regressions: "Pop Heroes", "Rockklassiker Vol. 2", "80s 100
+            // Hits", "Millennium Party", "Stranger Things Remix", a dozen remasters and live
+            // takes. `own` and `plain` are load-bearing and stay above the index.
+            val score = listOf(artistScore, titleScore, original, own, plain, -index)
             if (bestScore == null || compare(score, bestScore!!) > 0) {
                 best = candidate
                 bestScore = score
@@ -290,6 +325,23 @@ object ArtworkLookup {
         }
         return 0
     }
+
+    /**
+     * True when two artist keys are the same credit written in a different order.
+     *
+     * A duet is one act however it is billed, but the comparison below it is ordered — whole-
+     * word containment needs the wanted name to appear as a run inside the candidate's — so a
+     * swapped credit matches nothing at all. The station announced "Kenny Rogers + Dolly
+     * Parton"; Apple credits six rows of the studio recording to "Dolly Parton & Kenny Rogers"
+     * and exactly one row to "Kenny Rogers & Dolly Parton" — an all-star tribute concert, which
+     * was therefore the only candidate that scored and the cover the car showed (2026-08-15).
+     *
+     * Word *multiset* equality, which after [artistKey] is strict: same words, same count, join
+     * spellings already flattened. It ranks in the same tier as an exact match, since the two
+     * spellings name the same recording.
+     */
+    private fun sameCredit(a: String, b: String): Boolean =
+        a.split(' ').sorted() == b.split(' ').sorted()
 
     /** Whole-word containment, so a short artist name can't match inside a longer word. */
     private fun containsWords(haystack: String, needle: String): Boolean {
@@ -366,6 +418,15 @@ object ArtworkLookup {
     /** Joins between co-credited artists in a StreamTitle. See [leadArtist]. */
     private val CREDIT_SEPARATOR = Regex(
         "\\s*(?:[+&,/]|\\b(?:feat\\.?|featuring|with|vs\\.?|duet with)\\b)\\s*",
+        RegexOption.IGNORE_CASE
+    )
+    /**
+     * A different performance of the same song. Matched against the track's bracketed
+     * qualifiers and the release title only — see [SearchResult.isRendition] for why never the
+     * bare track name, and why "remaster" is absent.
+     */
+    private val RENDITION = Regex(
+        "re-?record|\\bremix\\b|\\blive\\b|\\bunplugged\\b|\\bacoustic\\b",
         RegexOption.IGNORE_CASE
     )
     private val JUNK = Regex(
