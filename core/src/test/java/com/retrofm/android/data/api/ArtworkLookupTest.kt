@@ -408,6 +408,29 @@ class ArtworkLookupTest {
         assertEquals("David Bowie", best?.artistName)
     }
 
+    /**
+     * The stream announced "Somebody´s watching me (edit)" and the search returned zero
+     * candidates — the only 0-result query in the whole 1.0.54 corpus. Measured 2026-08-17: the
+     * acute and grave accents both return 0, while `’`, `'` and no apostrophe at all return 15.
+     * Only the two spacing accents are repaired, and only in the outgoing term.
+     */
+    @Test
+    fun `a spacing accent standing in for an apostrophe is repaired in the search term`() {
+        assertEquals(
+            "Rockwell Somebody's watching me (edit)",
+            ArtworkLookup.searchable("Rockwell Somebody´s watching me (edit)")
+        )
+        assertEquals("Somebody's", ArtworkLookup.searchable("Somebody`s"))
+    }
+
+    /** Spellings Apple already accepts are left exactly as the station wrote them. */
+    @Test
+    fun `apostrophes Apple accepts are left alone`() {
+        for (term in listOf("Somebody's watching me", "Somebody’s watching me", "Somebodys")) {
+            assertEquals(term, ArtworkLookup.searchable(term))
+        }
+    }
+
     @Test
     fun `the plain single beats a live or remix entry`() {
         val best = ArtworkLookup.pick(

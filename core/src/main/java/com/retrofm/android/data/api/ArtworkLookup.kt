@@ -170,7 +170,7 @@ object ArtworkLookup {
      */
     private fun search(term: String, startedAt: Long): List<SearchResult>? {
         val url = RetroFmConfig.ARTWORK_SEARCH_URL +
-            "?term=" + URLEncoder.encode(term, "UTF-8") +
+            "?term=" + URLEncoder.encode(searchable(term), "UTF-8") +
             "&entity=song&limit=" + RetroFmConfig.ARTWORK_SEARCH_LIMIT + "&country=SE"
 
         for (attempt in 1..RetroFmConfig.ARTWORK_LOOKUP_ATTEMPTS) {
@@ -214,6 +214,33 @@ object ArtworkLookup {
         }
         return null
     }
+
+    /**
+     * The search term as Apple will accept it: a stray spacing accent standing in for an
+     * apostrophe is replaced by a real one.
+     *
+     * This is about the *query*, not about comparing names — [normalize] already flattens all
+     * punctuation before candidates are scored. The stream announced
+     * "Somebody´s watching me (edit)" and the search returned **zero** candidates; measured
+     * 2026-08-17, one query each:
+     *
+     * | term                              | results |
+     * | `Somebody´s` (U+00B4 acute)       | 0       |
+     * | ``Somebody`s`` (U+0060 grave)     | 0       |
+     * | `Somebody’s` (U+2019 apostrophe)  | 15      |
+     * | `Somebody's` (ASCII)              | 15      |
+     * | `Somebodys` (none at all)         | 15      |
+     *
+     * So the typographic apostrophe is fine and a *missing* apostrophe is fine — only the two
+     * spacing accents, which are diacritic marks rather than punctuation, break the search.
+     * The "(edit)" suffix in that same title was measured innocent (15 results with it), which
+     * is why nothing here strips qualifiers: the four other bracketed titles in the same week's
+     * corpus all resolved as announced.
+     *
+     * Deliberately not applied to the cache key or the log line — those keep the station's own
+     * spelling, so the next odd character is visible rather than silently repaired.
+     */
+    internal fun searchable(term: String): String = term.replace(SPACING_ACCENT, "'")
 
     /**
      * Wait out [RetroFmConfig.ARTWORK_RETRY_DELAY_MS] before a retry. False when the wait was
@@ -418,6 +445,9 @@ object ArtworkLookup {
     private val BRACKETED = Regex("\\(.*?\\)|\\[.*?]")
     private val DASH_QUALIFIER = Regex("\\s+-\\s+")
     private val DOTTED_ACRONYM = Regex("(?:\\p{L}\\.){2,}")
+
+    /** Spacing accents the station writes where an apostrophe belongs. See [searchable]. */
+    private val SPACING_ACCENT = Regex("[´`]")
 
     /** The one join spelling [normalize] cannot flatten on its own. See [artistKey]. */
     private val CREDIT_JOIN_WORD = Regex("\\band\\b")

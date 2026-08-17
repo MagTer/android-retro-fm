@@ -273,6 +273,16 @@ falls under the rule below. The reachable alternative, ranking Apple's own order
 Remix", a dozen remasters and live takes). What shipped instead demotes the rendition, which
 gets the *wrong* cover off the screen without reaching the right one.
 
+**A stray spacing accent kills the search outright, and that is not a typo — it is encoding.**
+"Somebody´s watching me (edit)" was the only query in the whole 1.0.54 corpus that returned
+**zero** candidates. Measured 2026-08-17, one query each: `´` (U+00B4) → 0, `` ` `` (U+0060) →
+0, `’` (U+2019) → 15, `'` → 15, **no apostrophe at all** → 15. So Apple tolerates a missing
+apostrophe but not a diacritic mark standing in for one. `searchable` replaces those two
+characters in the outgoing term only — the cache key and the log line keep the station's own
+spelling, so the next odd character shows up instead of being silently repaired. The "(edit)"
+suffix in the same title was measured innocent, which is why qualifiers are not stripped: the
+four other bracketed titles that week all resolved as announced.
+
 Known and deliberately unfixed: **the station's own typos.** "Starship – We Build This City"
 finds nothing because the song is "We *Built* This City". Fuzzy title matching would fix one
 sample and put a wrong cover on who knows how many others; leave it until the log shows a
