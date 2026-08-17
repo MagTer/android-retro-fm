@@ -273,6 +273,13 @@ object ArtworkLookup {
                 // Duets the other way round: "George Michael & Aretha Franklin" for "Aretha
                 // Franklin". Whole-word containment, so "Sting" never matches "Stingray".
                 containsWords(gotArtist, wantArtist) -> 1
+                // And the mirror image: Apple credits only the lead and moves the guest into
+                // the track name, so the wanted credit is *longer* than the candidate's and
+                // containment finds nothing. "Tom Jones & The Cardigans – Burning Down The
+                // House" rejected all fifteen rows, every one credited "Tom Jones" with
+                // "(feat. The Cardigans)" in the title. Lowest tier deliberately: it is the
+                // weakest evidence of agreement and must never outrank a fuller match.
+                wantArtist.startsWith("$gotArtist ") -> 1
                 else -> return@forEachIndexed
             }
 

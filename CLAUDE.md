@@ -236,6 +236,15 @@ spelled it without dots: a 1996 Berlin live recording on a "Missing EP" (field-r
 leaves "Boney M." and "Mr. Big" alone, and deliberately does not touch apostrophes, since
 asymmetric apostrophes ("Ain't" vs "Aint") are a separate problem nothing has measured yet.
 
+**The credit can be too long as well as too short.** Whole-word containment looks for the wanted
+artist *inside* the candidate's, so when Apple credits only the lead and moves the guest into
+the track name the wanted credit is the longer one and nothing matches: "Tom Jones & The
+Cardigans – Burning Down The House" rejected all fifteen rows, every one credited "Tom Jones /
+Burning Down the House (feat. The Cardigans)". `pick` accepts the mirror image at the **lowest**
+artist tier, so it can never outrank a fuller agreement. Replaying the 123-track corpus: two
+misses become correct covers (Tom Jones, Narada Michael Walden & Patti Austin), nothing else
+moves.
+
 **A duet is one act however it is billed — and the comparison below the top tier is ordered.**
 The station announced "Kenny Rogers + Dolly Parton"; Apple credits the studio recording to
 "Dolly Parton & Kenny Rogers" on six rows and to "Kenny Rogers & Dolly Parton" on exactly one —

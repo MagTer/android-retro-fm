@@ -307,6 +307,39 @@ class ArtworkLookupTest {
         assertEquals("Everytime We Touch (Remastered) - Single", best?.collectionName)
     }
 
+    /**
+     * Field case 2026-08-15: the logo for "Burning Down The House". The station credits the
+     * duet in full, Apple credits only the lead and moves the guest into the track name, so the
+     * wanted credit is *longer* than every candidate's and whole-word containment finds nothing
+     * — all fifteen rows rejected. Order verbatim from the API.
+     */
+    @Test
+    fun `a candidate crediting only the lead artist still matches`() {
+        val best = ArtworkLookup.pick(
+            "Tom Jones & The Cardigans", "Burning Down The House",
+            listOf(
+                r("Tom Jones", "Burning Down the House (feat. The Cardigans)", "Best of the Cardigans", "The Cardigans"),
+                r("Tom Jones", "Burning Down the House (feat. The Cardigans)", "Reload"),
+                r("Tom Jones", "Burning Down The House (feat. The Cardigans)", "1999 Best of by uDiscover", "Various Artists"),
+                r("Taylor Swift", "Wildest Dreams (Taylor's Version)", "Wildest Dreams (Taylor's Version) - Single")
+            )
+        )
+        assertEquals("Reload", best?.collectionName)
+    }
+
+    /** The weakest artist tier must never outrank a candidate that agrees more fully. */
+    @Test
+    fun `the lead-only match loses to the full credit`() {
+        val best = ArtworkLookup.pick(
+            "Tom Jones & The Cardigans", "Burning Down The House",
+            listOf(
+                r("Tom Jones", "Burning Down the House (feat. The Cardigans)", "Reload"),
+                r("Tom Jones & The Cardigans", "Burning Down the House", "Reload (Deluxe)")
+            )
+        )
+        assertEquals("Reload (Deluxe)", best?.collectionName)
+    }
+
     /** Artist agreement still outranks the compilation signal. */
     @Test
     fun `an own-release by the wrong artist never beats the right artist`() {
