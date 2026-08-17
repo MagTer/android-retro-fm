@@ -53,6 +53,23 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
   embedded bitmaps — it renders only local URIs. All art routes through `AlbumArtContentProvider`
   (`:core`), which proxies+caches the remote image behind a `content://` URI. Never set a raw
   `https` `artworkUri`/`artworkData` for the car.
+- **An in-place update can leave CarMediaService bound to the dead process, and only an
+  infotainment restart clears it.** Symptom (2026-08-13, 1.0.54): blank screen, no audio, but
+  the app is demonstrably alive — it logs its process start, answers `onGetLibraryRoot` from
+  both `com.android.car.media` and `com.volvocars.launcher`, and keeps shipping network events
+  for hours. The tell is that **`onGetChildren` is never called** and no playback is ever
+  requested (`prepare gated — playback not requested yet` forever), where every healthy cold
+  start goes root → `onGetChildren(stations) -> 1 children` → `playWhenReady=true` within
+  ~20 s. Reading it as an app-side regression is the trap: the app's answers are correct, but
+  a dead binding is asking.
+  - It happens when Play installs the update while the media source is *active* — the old
+    process is killed mid-session and the system service keeps the stale binding.
+  - **Uninstalling and reinstalling does not fix it.** The bad state lives in a different
+    process, not in the app; the app's uid changing across starts is proof the reinstall
+    happened while the symptom persisted. Restart the infotainment system.
+  - So: before bisecting or reverting a release on a "the car won't start" report, get a cold
+    boot. A whole investigation went into a diff that could not reach the failing path — the
+    changed code had not executed even once, since no track boundary ever arrived.
 - **Cast is off in the car.** `PlayerManager` never builds a `CastPlayer` on `FEATURE_AUTOMOTIVE`,
   and `:automotive` excludes the whole `com.google.android.gms` + `com.google.android.datatransport`
   dependency (their startup components trigger a "needs Google Play services" error on head units).
