@@ -46,7 +46,9 @@ class AlbumArtContentProvider : ContentProvider() {
         private val ALLOWED_HOSTS = setOf(
             "media.bauerradio.com",
             "assets.planetradio.co.uk",
-            "mzstatic.com"
+            "mzstatic.com",
+            // The station's own covers (StationNowPlaying), served from /nowPlayingMedia/.
+            "retrofm.se"
         )
         private const val B64 = Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
 

@@ -26,6 +26,7 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.retrofm.android.core.R
 import com.retrofm.android.data.api.ArtworkLookup
+import com.retrofm.android.data.api.StationNowPlaying
 import com.retrofm.android.data.config.RetroFmConfig
 import com.retrofm.android.data.model.TrackInfo
 import kotlinx.coroutines.CoroutineScope
@@ -660,10 +661,29 @@ class RetroFmPlaybackService : MediaLibraryService() {
             // Resolve the cover BEFORE publishing, so each track updates the surfaces exactly
             // once. Applying the title first and the art second made the car flash the station
             // logo on every song (field-tested 2026-08-08).
+            //
+            // Two sources, started together and never in sequence. The station's own page knows
+            // which *record* is playing — iTunes can only match the announced text, and returns
+            // the 1984 original for a remix the station is actually spinning — so it is
+            // preferred when it confirms this track. But it is the slower and less certain of
+            // the two, and the car's modem punishes a serial second request: every drive's
+            // first iTunes lookup timed out at 8 s during the week of 2026-08-13. In parallel,
+            // a station page that is late or disagreeing costs nothing, because the iTunes
+            // answer is already in hand by the time we stop waiting for it.
+            val station = async(Dispatchers.IO) {
+                StationNowPlaying.artworkUrl(track.title, track.artist)
+            }
             val lookup = async(Dispatchers.IO) {
                 ArtworkLookup.artworkUrl(track.artist, track.title)
             }
-            val url = withTimeoutOrNull(RetroFmConfig.ARTWORK_FIRST_APPLY_BUDGET_MS) { lookup.await() }
+            val startedAt = SystemClock.elapsedRealtime()
+            val stationUrl =
+                withTimeoutOrNull(RetroFmConfig.STATION_ARTWORK_BUDGET_MS) { station.await() }
+            if (stationUrl == null) station.cancel()
+            val remaining = RetroFmConfig.ARTWORK_FIRST_APPLY_BUDGET_MS -
+                (SystemClock.elapsedRealtime() - startedAt)
+            val url = stationUrl
+                ?: if (remaining > 0) withTimeoutOrNull(remaining) { lookup.await() } else null
             applyTrackMetadata(url?.let { track.copy(imageUrl = it) } ?: track)
             if (url != null) return@launch
 

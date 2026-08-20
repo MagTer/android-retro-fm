@@ -160,6 +160,57 @@ object RetroFmConfig {
     const val ARTWORK_CACHE_ENTRIES = 100
 
     /**
+     * The station's own now-playing page (see [com.retrofm.android.data.api.StationNowPlaying]).
+     *
+     * Server-rendered, no JavaScript and no Blazor circuit: a plain GET carries the current
+     * title, artist and album id. ~12.8 KB gzipped.
+     */
+    const val STATION_NOWPLAYING_URL = "https://retrofm.se/"
+
+    /** Cover for an album id from that page. `/nowPlayingMedia/` returns real 404s, so a 200 is real. */
+    const val STATION_ARTWORK_URL_PREFIX = "https://retrofm.se/nowPlayingMedia/albums/"
+
+    /** `md` is 600x600, matching [ARTWORK_RENDITION] so both sources deliver the same size. */
+    const val STATION_ARTWORK_SUFFIX = "-md.jpg"
+
+    /**
+     * Fetches allowed per track boundary before giving up on the station's page.
+     *
+     * The first fetch after a boundary is usually *not* the one that agrees. Measured over 13
+     * boundaries on 2026-08-20: right immediately 6 times, no player block at all 3 times, still
+     * showing another track 4 times — and a second fetch a few hundred ms later took it from
+     * 6/13 to 10/13. A third adds almost nothing, because what has not agreed by then is a page
+     * describing a different playout, not a page that is merely late.
+     */
+    const val STATION_NOWPLAYING_ATTEMPTS = 3
+
+    /** Spacing between those attempts. Short: the page settles in well under a second. */
+    const val STATION_NOWPLAYING_RETRY_MS = 400L
+
+    /**
+     * How much of [ARTWORK_FIRST_APPLY_BUDGET_MS] the station's page may spend before the iTunes
+     * result is used instead.
+     *
+     * The two run in parallel, so this is not additive — it is the point at which we stop
+     * waiting for the better answer and take the one already in hand. Measured page lag (upper
+     * bounds, 12 agreements, 2026-08-20): 0.20, 0.23, 0.23, 0.48, 0.60, 0.68, 0.82, 0.84, 0.87,
+     * 0.92, 1.51, 2.18 s — ten of thirteen inside one second. 1.2 s keeps the whole budget
+     * intact for the iTunes fallback while covering the bulk of that distribution.
+     *
+     * Do not raise this to catch the 2.18 s tail. It buys one boundary in thirteen and pays for
+     * it with title latency on every boundary where neither source answers, which is the same
+     * trade ARTWORK_FIRST_APPLY_BUDGET_MS already refused.
+     *
+     * **These numbers are from a fixed line.** The car's modem is the real variable — every
+     * drive's first iTunes lookup timed out at 8 s during the week of 2026-08-13 — so treat the
+     * field coverage as lower than the measurement, and never as a reason to wait longer.
+     */
+    const val STATION_ARTWORK_BUDGET_MS = 1_200L
+
+    /** Sent to the station's page so its logs show a real client rather than a bare default. */
+    const val STATION_USER_AGENT = "RetroFM-Android/1.0 (+https://github.com/MagTer/android-retro-fm)"
+
+    /**
      * Backoff schedule for stream reconnect attempts after a player error. Escalates and then
      * holds at the last value — reconnect is retried indefinitely while playback is wanted (no
      * hard give-up), so the stream self-heals whenever validated internet returns.

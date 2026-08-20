@@ -87,6 +87,14 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
   broadcaster's spliced ads — acceptable for a personal internal-testing build, but it must NOT
   ship to a public/production track without resolving Retro FM/Bauer licensing (restreaming their
   station publicly is a licensing matter regardless of the mute).
+- **Fetching the station's own page is a per-device dependency, accepted deliberately
+  (2026-08-20).** `StationNowPlaying` fetches `retrofm.se` from each install, one to three times
+  per track change — ~20–40 requests/hour on one device. Accepted by the maintainer on the
+  grounds that this is a private build with a single user, so the app makes no more requests
+  than any other client of a public, unauthenticated page. **That reasoning does not survive a
+  wider audience.** If this ever goes beyond the private circle, it needs a single shared relay
+  fanning out to clients, and a courtesy note to Mad Men Media — the same objection that ruled
+  out the Blazor circuit. It sits under the same licensing caveat as ad muting, above.
 - **Log hygiene is a wire contract.** Field logs leave the device via the remote sink (Timber +
   LogsinkTree); never log tokens, credentialed URLs, or PII.
 - Live stream: reconnect retries indefinitely while playback is wanted and recovers on *validated*
@@ -161,7 +169,53 @@ inventory. Three consequences that are not obvious from the code:
 - Retrofit and kotlinx-serialization are now unused by `:core` but still declared — left in
   place deliberately, since a replacement source would likely want them back.
 
-**Album art comes from iTunes Search now** (`ArtworkLookup`). The mount carries no artwork, so the
+**Album art has two sources: the station's own page first, iTunes Search as the fallback.**
+`StationNowPlaying` is preferred because iTunes can only match the announced `Title - Artist`
+text, and that text is sometimes not enough to identify the *record*: "Wouldn't It Be Good - Nik
+Kershaw" resolves to the 1984 original while the station is playing a later remix and showing
+the remix sleeve. No amount of candidate scoring reaches that — the distinguishing information
+is not in the string being matched. Everything below about `ArtworkLookup` still applies; it now
+runs as the second-choice source.
+
+A plain `GET https://retrofm.se/` server-renders the current track (no JavaScript, no Blazor
+circuit, ~12.8 KB gzipped) with an album id, and `/nowPlayingMedia/albums/{id}-{th|sm|md|lg}.jpg`
+serves the cover at 100/300/600/1000 px. Unlike the rest of that site, `/nowPlayingMedia/`
+returns a **real 404** for a wrong name instead of the 56 KB SPA fallback, so a 200 from it can
+be trusted — the "a 200 means not found" rule below does not apply to that route.
+
+**The page is not always describing the same playout as the mount, and that is the whole design
+constraint.** Measured across 32 boundaries on 2026-08-20:
+
+- Page lag behind the mount, upper bounds of the twelve agreements: **0.20, 0.23, 0.23, 0.48,
+  0.60, 0.68, 0.82, 0.84, 0.87, 0.92, 1.51, 2.18 s** — ten of thirteen inside one second. An
+  earlier capture said "≈5.3 s" for five of them; that was a 5 s polling step, not the site.
+- The **first** fetch after a boundary is usually not the one that agrees: right immediately 6
+  times, no player block at all 3 times, still showing another track 4 times. A second fetch a
+  few hundred ms later takes it from 6/13 to 10/13, hence `STATION_NOWPLAYING_ATTEMPTS`.
+- The page serves markup with **no player block** in ~8 % of fetches (6 of 73), scattered
+  *inside* songs, not clustered at boundaries. It is "no answer", never a signal.
+- Roughly once in fifteen boundaries the page shows a track the mount never announces and stays
+  there for minutes (2026-08-20 17:18, and again 16:47 the same morning).
+
+So the album id is used **only when the page's title and artist both agree with the track being
+displayed** (`StationNowPlaying.agrees`, whitespace- and case-insensitive, nothing looser). A
+disagreement returns null and iTunes takes over. That guard is load-bearing, not defensive:
+without it the two stale-page cases would have put Art Garfunkel's cover on Jon Secada and Donna
+Summer's on Whitney Houston. **Never relax it into a title-only match.**
+
+**The two sources run in parallel, never in sequence.** The station page is bounded by
+`STATION_ARTWORK_BUDGET_MS` (1.2 s) inside the overall `ARTWORK_FIRST_APPLY_BUDGET_MS` (1.5 s),
+so a late or disagreeing page costs nothing — the iTunes answer is already in hand when we stop
+waiting. Serial would be actively harmful: the car's modem timed out every drive's *first*
+iTunes lookup at 8 s during the week of 2026-08-13, and a second serial request would inherit
+that. All the timings above are from a **fixed line**; field coverage will be lower, and that is
+never a reason to raise the budgets.
+
+The station's text carries HTML entities (`Yazz &amp; The Plastic Population`, seen live
+2026-08-20), so the fields are unescaped before comparing — without that the ICY string's plain
+`&` never matches and the cover is silently lost.
+
+**Album art comes from iTunes Search** (`ArtworkLookup`). The mount carries no artwork, so the
 first field test of 1.0.40 showed the station logo on every track — the pipeline was fine, but
 every track had the same `imageUrl`, and Media3's `CacheBitmapLoader` dedupes on the URI, so
 exactly one bitmap load happened all drive. Covers are looked up by "artist title" against the
@@ -390,6 +444,16 @@ A plain silence timeout cannot fix that: the confirmed news episode held **312 s
 longest legitimate song ("Piano Man") held **312 s**. Those do not merely overlap, they
 coincide.
 
+**And the station's own page does not help either — measured, so nobody chases it a third
+time.** The page carries four fields the mount never sends (`title`, `artist`, `dj`, `show`), so
+it looked like the obvious place to find a non-music signal. A capture over the 18:00 CEST
+bulletin on 2026-08-20 (page sampled every 20 s, mount held open) says no. The mount went silent
+for **145 s** starting at 17:59:20 local — right on the hour — and throughout it the page kept
+showing the previous song with its album id, exactly as the mount did. `show` and `dj` held the
+programme name the whole window; they track the **schedule**, not the current item. There is no
+news marker, no null album, no state change of any kind. Non-music remains invisible on every
+surface the station exposes.
+
 **But the re-announcement is a genuine end-of-track marker, and an earlier version of this note
 wrongly dismissed it.** Measuring it from the track's *start* gives a useless 84–309 s spread.
 Measured to the *next* title it is tight: **3–14 s in 13 of 14 samples** (2026-08-10 capture).
@@ -430,19 +494,30 @@ four times in nine seconds. A guard that only arms the timer when the marker arr
 the track would cover every observed case — the earliest *last* marker in the week is 28 s —
 but it is not implemented.
 
-### retrofm.se: dead ends, so nobody re-runs them (probed 2026-08-08)
+### retrofm.se: dead ends, so nobody re-runs them (probed 2026-08-08, settled 2026-08-20)
 
-Two live metadata sources exist on `retrofm.se`. **Both were investigated in full and neither is
-worth building on** now that the stream carries ICY:
+The page itself is *not* a dead end — see the artwork section above; it is where the station's
+own covers come from. These are the two push-style surfaces, and neither is worth building on:
 
-- `/nowplayinghub` — a real ASP.NET Core SignalR hub (gives itself away by answering
-  `400 Connection ID required` instead of the SPA fallback). Whole public surface is
-  `AddToGroup`/`RemoveFromGroup` with a `Send` callback. Blocked on one unknown: the group name.
-  ~20 candidates were excluded by sitting in the group across verified track boundaries. If it is
-  ever needed, ask the station for that one string rather than guessing.
+- **`/nowplayinghub` — closed, and now proven rather than suspected.** An earlier version of
+  this note said it was "blocked on one unknown: the group name", and advised asking the station
+  for that string. **That framing was wrong.** The surface was confirmed on 2026-08-20:
+  `AddToGroup(string)` and `RemoveFromGroup(string)` both exist (against a deliberate
+  `Method does not exist` control) and the server callback is `Send` — taking a **single
+  string**, which by itself cannot carry an artwork object. Two connections held open across
+  boundaries confirmed live on the mount produced **zero** pushes: one joined to the station's
+  own GUID (discovered from `/uploads/stations/…-w150.png`, not guessed), one joined to nothing.
+  The join echo is verbatim the stock ASP.NET SignalR groups sample text, and in nine minutes no
+  other client ever joined. The settling observation: **retrofm.se's own browser never connects
+  to the hub** — a full network capture of a real page load shows exactly one negotiate,
+  `/_blazor/negotiate`, there is no SignalR module in the 176-entry importmap, and none of the
+  Caster JS bundles mention `signalr`, `HubConnection` or `AddToGroup`. Nothing publishes into
+  it and no client-side artefact can reveal a group name, because no client uses it. Do not
+  spend more guesses here.
 - `/_blazor` — the site's own Blazor Server circuit, which does deliver live title/artist/art.
   Rejected on principle: it holds per-client server state, so a fleet of phones parked on it is a
-  real cost to someone else's site, and it parses undocumented UI internals.
+  real cost to someone else's site, and it parses undocumented UI internals. Superseded anyway:
+  the prerendered HTML carries the same data with no circuit and no server state.
 
 Three reusable lessons from that hunt:
 

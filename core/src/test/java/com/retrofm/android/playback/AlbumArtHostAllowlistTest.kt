@@ -20,7 +20,8 @@ class AlbumArtHostAllowlistTest {
     private val allowed = setOf(
         "media.bauerradio.com",
         "assets.planetradio.co.uk",
-        "mzstatic.com"
+        "mzstatic.com",
+        "retrofm.se"
     )
 
     private fun isAllowed(url: String): Boolean {
@@ -41,6 +42,20 @@ class AlbumArtHostAllowlistTest {
                 "825646124688.jpg/${RetroFmConfig.ARTWORK_RENDITION}.jpg"
             assertTrue("is$n-ssl.mzstatic.com must be allowlisted", isAllowed(url))
         }
+    }
+
+    /**
+     * The station's own covers (StationNowPlaying). Added in the same commit as the source, per
+     * the rule above — a new artwork source is two changes, not one.
+     */
+    @Test
+    fun `the station's own artwork is fetchable`() {
+        assertTrue(
+            isAllowed(
+                com.retrofm.android.data.api.StationNowPlaying
+                    .artworkUrlFor("c09ed951-f7ac-460f-b54e-c69d3203a861")
+            )
+        )
     }
 
     @Test
