@@ -576,4 +576,13 @@ redeploy** of the log infra, so re-enable DEBUG before an investigation. The exa
 - **Log lines cost wire bytes, so keep them short.** The artwork `content://` URIs are the
   remote URL base64'd into the path — ~300 chars, twice per bitmap load. They alone filled the
   batches that the 4 KB cap then rejected. `AlbumArtContentProvider.describe` renders them as
-  `host/lastSegment` instead; prefer that shape for anything logged in a loop.
+  `host/name` instead; prefer that shape for anything logged in a loop.
+- **But short is not the same as identifying, and that cost a whole investigation.** `describe`
+  used to take the *last* path segment. Apple serves every cover under the same rendition
+  filename, so all artwork logged as `is1-ssl.mzstatic.com/600x600bb.jpg` — one indistinguishable
+  line per track, per drive. When a wrong cover was reported from the car (2026-08-21, Günther's
+  "Pleasureman" under Samantha Fox) the logs could not say which image had been on screen; every
+  candidate cover had to be re-fetched from the CDN by hand and eyeballed. It now skips a
+  `WxH….ext` segment and names the one before it — Apple's is the release UPC.
+  `AlbumArtDescribeTest` pins it, including that two different covers cannot render alike.
+  **A shortened identifier that is equal for every value is not a log line, it is a constant.**

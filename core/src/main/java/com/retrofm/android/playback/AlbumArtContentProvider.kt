@@ -73,8 +73,22 @@ class AlbumArtContentProvider : ContentProvider() {
         fun describe(uri: Uri): String {
             if (uri.authority != AUTHORITY) return uri.toString()
             val remote = uri.lastPathSegment?.let { decode(it) } ?: return "content:(undecodable)"
-            return Uri.parse(remote).let { "${it.host}${it.lastPathSegment?.let { s -> "/$s" }.orEmpty()}" }
+            val parsed = Uri.parse(remote)
+            // Skip the rendition filename. Apple serves every cover under the same one, so the
+            // last segment names the *size* and not the image: a whole drive's artwork logged as
+            // "is1-ssl.mzstatic.com/600x600bb.jpg" on every line, and a field report of a wrong
+            // cover could not be checked against the log at all — the covers had to be re-fetched
+            // by hand to find out what had actually been on screen (2026-08-21, Günther's
+            // "Pleasureman" shown for Samantha Fox). The segment before it is the release's UPC,
+            // which does identify it. The station's own covers and the logo already end in a
+            // distinguishing name and are unaffected.
+            val segments = parsed.pathSegments.orEmpty()
+            val name = segments.lastOrNull { !RENDITION.matches(it) } ?: segments.lastOrNull()
+            return "${parsed.host}${name?.let { "/$it" }.orEmpty()}"
         }
+
+        /** A `WxH….ext` filename names the rendition, not the image — Apple's `600x600bb.jpg`. */
+        private val RENDITION = Regex("""\d+x\d+[^/]*\.\w+""")
     }
 
     // Per-image locks so concurrent requests for the same art download it once (see openFile).
