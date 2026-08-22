@@ -296,11 +296,25 @@ constraint.** Measured across 32 boundaries on 2026-08-20:
 - Page lag behind the mount, upper bounds of the twelve agreements: **0.20, 0.23, 0.23, 0.48,
   0.60, 0.68, 0.82, 0.84, 0.87, 0.92, 1.51, 2.18 s** — ten of thirteen inside one second. An
   earlier capture said "≈5.3 s" for five of them; that was a 5 s polling step, not the site.
-  **Do not read that as the worst case — it is the good case.** A 55-boundary capture on
-  2026-08-22 found the page running a *whole track* behind for long stretches: 12 of 55
-  boundaries, and **9 of the last 11 across a 45-minute run** where it consistently showed the
-  previous song. The car saw the same window from the road. `agrees` rejects all of it, so it
-  costs the full 1.2 s budget per boundary and buys nothing; it is a cost, not a wrong cover.
+  Re-measured cleanly on 2026-08-22 — one thread doing nothing but read the mount, another
+  polling the page, no shared blocking — and it holds: **12 boundaries over 50 minutes lagged
+  1, 3, 4, 5, 6, 11, 12, 13, 14 and 26 s**, median 11 s. The page is normally within seconds,
+  which is also what the maintainer sees using the station's own web player.
+- **The real failure is that the page inserts tracks the mount never announces.** Same clean
+  run: 3 of 15 page changes had no mount counterpart at all — "Liberian Girl", "I'll Be
+  Around", "Easy" — and one of them held the page for **3 min 18 s** while the mount was
+  playing Mustang Sally. That single episode is the only lag above 26 s in the whole run.
+  `agrees` rejects the window, so it costs the 1.2 s budget and buys nothing; it is a cost,
+  never a wrong cover.
+- **A 55-boundary capture the same day read as "a whole track behind" for 45 minutes. Treat that
+  as unexplained, not as a property of the site.** It has not reproduced, and its harness fetched
+  the page on the *same thread* that read the mount, so the socket went unread for 1–3 s at every
+  boundary and the mount timestamps cannot be trusted. The obvious rescue — that the mount skips
+  announcements, which would make a correct page look one behind — was tested against that data
+  and **rejected**: gaps before the lagging rows were normal (median 236 s against 239 s for the
+  rest). This note has now been revised twice on new evidence. If a third capture disagrees,
+  suspect the harness before the station, and never share a thread between the reader and the
+  fetches.
 - The **first** fetch after a boundary is usually not the one that agrees: right immediately 6
   times, no player block at all 3 times, still showing another track 4 times. A second fetch a
   few hundred ms later takes it from 6/13 to 10/13, hence `STATION_NOWPLAYING_ATTEMPTS`.
