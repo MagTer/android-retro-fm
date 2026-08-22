@@ -80,6 +80,34 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
   - So: before bisecting or reverting a release on a "the car won't start" report, get a cold
     boot. A whole investigation went into a diff that could not reach the failing path — the
     changed code had not executed even once, since no track boundary ever arrived.
+- **Cast needs the exact opposite, and one MediaItem serves both.** A Cast receiver is a
+  different device on the network: it cannot resolve `content://com.magter.retrofm.artwork/…`,
+  because that provider only exists inside this process. Until 2026-08-22 every LOAD payload
+  carried one anyway, so the receiver never showed a cover — the Automotive rule above applied
+  one step too early, to the shared item rather than to the surface that needs it.
+  - The seam is `RetroFmMediaItemConverter.forReceiver`, which maps the URI back with
+    `AlbumArtContentProvider.remoteUriOf` (the inverse of `mapUri`, and the same decoder
+    `describe` uses). **Receiver-specific translation belongs in that converter** — it is
+    already where LIVE stream type and `contentId` are fixed — never in `buildStationItem` and
+    never as a route check in the service, which would spread Cast knowledge across surfaces
+    that do not care.
+  - **Device type is deliberately not consulted.** Cast's only hard rule for audio-only
+    devices (Home Mini) is "do not send a *video* stream"; metadata images are simply ignored
+    by a device with no screen, and the "avoid image assets" advice in Google's audio guide is
+    addressed to *receiver app* authors. So one correct https URL is right for a Nest Hub and a
+    speaker alike. The one place device type genuinely matters is **volume**: on an audio
+    device the sender controls the full device range and should use smaller increments. Not
+    implemented.
+  - **We announce the wrong `contentType` to the receiver and it is knowingly left that way.**
+    The mount serves `audio/aacp` (raw ADTS HE-AAC, verified from its live headers 2026-08-22);
+    we send `audio/mpeg`. Harmless locally — ExoPlayer sniffs — but the Default Media Receiver
+    picks its pipeline from that field, so it is a candidate for the slow flapping start (38 s
+    from transfer to stable audio on a real receiver that day). It is not a one-line fix:
+    Cast's supported-media list documents HE-AAC only as `audio/mp4; codecs="mp4a.40.5"`, an
+    MP4 container this stream does not have, and does not mention `audio/aacp` or raw ADTS at
+    all — so the accurate value may simply be refused while the wrong one demonstrably plays.
+    `RetroFmConfig.CAST_CONTENT_TYPE` is the knob and carries the three candidates; change it,
+    cast once, and measure the gap between `cast transfer: LOCAL -> REMOTE` and `isPlaying=true`.
 - **Cast is off in the car.** `PlayerManager` never builds a `CastPlayer` on `FEATURE_AUTOMOTIVE`,
   and `:automotive` excludes the whole `com.google.android.gms` + `com.google.android.datatransport`
   dependency (their startup components trigger a "needs Google Play services" error on head units).

@@ -63,6 +63,21 @@ class AlbumArtContentProvider : ContentProvider() {
             runCatching { String(Base64.decode(token, B64)) }.getOrNull()
 
         /**
+         * The inverse of [mapUri]: the remote URL behind one of our content:// URIs, or null
+         * for anything else.
+         *
+         * Exists because a Cast receiver is a **different device on the network** and cannot
+         * resolve an Android ContentProvider URI — the artwork it was sent was unusable
+         * (2026-08-22). The content:// mapping is an Automotive requirement, so the place to
+         * undo it is the Cast boundary, not the shared MediaItem; see
+         * [RetroFmMediaItemConverter].
+         */
+        fun remoteUriOf(uri: Uri): Uri? {
+            if (uri.authority != AUTHORITY) return null
+            return uri.lastPathSegment?.let { decode(it) }?.let(Uri::parse)
+        }
+
+        /**
          * Short, human-readable form of one of our content:// URIs, for logging.
          *
          * The raw URI is the remote URL base64'd into the path — ~300 characters of noise per
@@ -72,8 +87,7 @@ class AlbumArtContentProvider : ContentProvider() {
          */
         fun describe(uri: Uri): String {
             if (uri.authority != AUTHORITY) return uri.toString()
-            val remote = uri.lastPathSegment?.let { decode(it) } ?: return "content:(undecodable)"
-            val parsed = Uri.parse(remote)
+            val parsed = remoteUriOf(uri) ?: return "content:(undecodable)"
             // Skip the rendition filename. Apple serves every cover under the same one, so the
             // last segment names the *size* and not the image: a whole drive's artwork logged as
             // "is1-ssl.mzstatic.com/600x600bb.jpg" on every line, and a field report of a wrong

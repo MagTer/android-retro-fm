@@ -5,6 +5,7 @@ import com.retrofm.android.data.api.StationNowPlaying
 import com.retrofm.android.data.config.RetroFmConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -80,5 +81,34 @@ class AlbumArtDescribeTest {
     fun `a uri this provider does not serve is passed through unchanged`() {
         val foreign = "content://com.example.other/thing"
         assertEquals(foreign, AlbumArtContentProvider.describe(Uri.parse(foreign)))
+    }
+
+    /**
+     * The Cast path depends on this inverse: a receiver is a different device and cannot
+     * resolve our content:// URIs, so [RetroFmMediaItemConverter] maps them back before the
+     * LOAD payload is built (2026-08-22 — before that, every payload carried an unusable
+     * content:// image).
+     */
+    @Test
+    fun `a mapped uri round-trips back to the remote url`() {
+        val mapped = AlbumArtContentProvider.mapUri(Uri.parse(limahlSoundtrack))
+        assertEquals(
+            Uri.parse(limahlSoundtrack),
+            AlbumArtContentProvider.remoteUriOf(mapped)
+        )
+    }
+
+    @Test
+    fun `the station's own cover round-trips too`() {
+        val url = StationNowPlaying.artworkUrlFor("fb5a6f3a-ba0f-450a-8bcb-1251b3896da8")
+        val mapped = AlbumArtContentProvider.mapUri(Uri.parse(url))
+        assertEquals(Uri.parse(url), AlbumArtContentProvider.remoteUriOf(mapped))
+    }
+
+    /** Anything this provider does not serve must be left exactly as it is. */
+    @Test
+    fun `a foreign uri has no remote url`() {
+        assertNull(AlbumArtContentProvider.remoteUriOf(Uri.parse("https://example.com/a.jpg")))
+        assertNull(AlbumArtContentProvider.remoteUriOf(Uri.parse("content://other/x")))
     }
 }

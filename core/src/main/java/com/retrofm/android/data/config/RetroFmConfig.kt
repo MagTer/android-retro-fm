@@ -273,6 +273,34 @@ object RetroFmConfig {
     const val CAST_LIVE_EDGE_NUDGE_DELAY_MS = 2_000L
 
     /**
+     * `contentType` announced to the Cast receiver. **Known to be wrong, deliberately left
+     * alone until it can be measured — do not "fix" it blind.**
+     *
+     * The mount actually serves `audio/aacp` at 96 kbps (read live from its headers
+     * 2026-08-22, `content-type: audio/aacp`, `icy-br: 96`), i.e. raw ADTS HE-AAC. We announce
+     * MP3. Locally that is harmless — ExoPlayer sniffs — but the Default Media Receiver picks
+     * its pipeline from this field, which makes it a candidate for the slow, flapping start
+     * seen on a real receiver that day (38 s from transfer to stable audio).
+     *
+     * What stops a one-line correction is that none of the three candidates is safe on the
+     * documentation alone:
+     *  - `audio/mpeg` (current) — a **supported** Cast type, wrong for these bytes, and it
+     *    demonstrably plays once it settles.
+     *  - `audio/aacp` — accurate, but Cast's supported-media list does not mention it, nor raw
+     *    ADTS at all. An unlisted type may simply be refused.
+     *  - `audio/mp4; codecs="mp4a.40.5"` — the documented HE-AAC spelling, but it claims an MP4
+     *    container this stream does not have.
+     *
+     * So this is a knob, not a conclusion: change the value, cast once, and read the field log
+     * for how long it takes to reach `isPlaying=true` after `cast transfer: LOCAL -> REMOTE`.
+     * A regression shows up immediately as a receiver that never leaves BUFFERING.
+     *
+     * This is Cast's notion of the content, not the player's: [MediaItemTree]'s `mimeType`
+     * feeds ExoPlayer's local extractor choice and is a separate decision.
+     */
+    const val CAST_CONTENT_TYPE = "audio/mpeg"
+
+    /**
      * How long the Cast receiver may sit "playback wanted, nothing playing" before the stream
      * is re-loaded onto it.
      *
