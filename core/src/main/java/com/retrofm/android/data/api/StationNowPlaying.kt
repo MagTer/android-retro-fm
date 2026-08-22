@@ -162,15 +162,47 @@ object StationNowPlaying {
     private fun key(value: String?): String? =
         value?.replace(WHITESPACE, " ")?.trim()?.lowercase()?.ifEmpty { null }
 
-    /** The handful of entities Razor emits; the fields are plain text otherwise. */
-    private fun unescape(value: String): String = value
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&apos;", "'")
-        .replace("&nbsp;", " ")
+    /**
+     * Decodes the entities the station's own markup carries, in one pass.
+     *
+     * This used to be a list of literal replacements, and the list was wrong in a way that cost
+     * real covers: it carried the *decimal* `&#39;` but ASP.NET emits the **hex** `&#x27;` for an
+     * apostrophe. Every title with one failed [agrees] even when the page agreed perfectly —
+     * `no agreement — page says Nothing&#x27;s Gonna Stop Me Now` in the field log — which
+     * measured **6 of 37 agreements lost (18 %)** on the 2026-08-22 corpus, one of them
+     * "Wouldn't It Be Good — Nik Kershaw", the exact track this source exists for.
+     *
+     * So numeric references are decoded by rule rather than by enumeration, which also closes
+     * the next spelling nobody has seen yet. Anything unrecognised is left verbatim: a stray `&`
+     * that is not an entity must survive, and an unknown name is better shown as itself than
+     * silently dropped.
+     *
+     * One pass, deliberately — replacing `&amp;` first would turn a literal `&amp;#39;` into
+     * `&#39;` and then into an apostrophe the station never wrote.
+     */
+    private fun unescape(value: String): String = ENTITY.replace(value) { match ->
+        val body = match.groupValues[1]
+        when {
+            body.startsWith("#x", ignoreCase = true) ->
+                body.drop(2).toIntOrNull(16)?.let(::codePoint) ?: match.value
+            body.startsWith("#") -> body.drop(1).toIntOrNull()?.let(::codePoint) ?: match.value
+            else -> NAMED_ENTITIES[body] ?: match.value
+        }
+    }
+
+    private fun codePoint(value: Int): String? =
+        if (value in 1..Character.MAX_CODE_POINT) String(Character.toChars(value)) else null
+
+    private val ENTITY = Regex("&(#[xX][0-9a-fA-F]+|#[0-9]+|[a-zA-Z][a-zA-Z0-9]*);")
+
+    /**
+     * `nbsp` maps to a plain space on purpose: [key] collapses runs of `\s`, which in Java does
+     * **not** match U+00A0, so a real non-breaking space would survive and break the comparison.
+     */
+    private val NAMED_ENTITIES = mapOf(
+        "amp" to "&", "lt" to "<", "gt" to ">", "quot" to "\"",
+        "apos" to "'", "nbsp" to " "
+    )
 
     private val ALBUM_ID = Regex("/nowPlayingMedia/albums/([0-9a-fA-F-]{36})-")
     private val TITLE = Regex("class=\"cp-player-track-title\">([^<]*)<")

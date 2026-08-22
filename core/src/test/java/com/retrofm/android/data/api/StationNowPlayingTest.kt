@@ -150,4 +150,65 @@ class StationNowPlayingTest {
         assertNull(StationNowPlaying.artworkUrl("Nyheterna", "Retro FM"))
         assertNull(StationNowPlaying.artworkUrl("", "Culture Club"))
     }
+
+    /**
+     * The field case, 2026-08-22: ASP.NET emits the **hex** apostrophe, and `unescape` only
+     * listed the decimal one. The page agreed perfectly and was rejected — the log line read
+     * `no agreement — page says Nothing&#x27;s Gonna Stop Me Now`. It cost 6 of 37 agreements
+     * (18 %) on that day's corpus, "Wouldn't It Be Good — Nik Kershaw" among them.
+     */
+    @Test
+    fun `a hex apostrophe is decoded, not treated as a mismatch`() {
+        val snapshot = StationNowPlaying.parse(
+            page("Nothing&#x27;s Gonna Stop Me Now", "Samantha Fox")
+        )
+        assertTrue(
+            StationNowPlaying.agrees(snapshot, "Nothing's Gonna Stop Me Now", "Samantha Fox")
+        )
+    }
+
+    /** The decimal spelling was already handled and must stay handled. */
+    @Test
+    fun `a decimal apostrophe still decodes`() {
+        val snapshot = StationNowPlaying.parse(page("Don&#39;t Go", "Yazoo"))
+        assertTrue(StationNowPlaying.agrees(snapshot, "Don't Go", "Yazoo"))
+    }
+
+    /** Uppercase &#X27; is the same reference; the rule must not be case-sensitive. */
+    @Test
+    fun `an uppercase hex reference decodes too`() {
+        val snapshot = StationNowPlaying.parse(page("Don&#X27;t Go", "Yazoo"))
+        assertTrue(StationNowPlaying.agrees(snapshot, "Don't Go", "Yazoo"))
+    }
+
+    /** Non-ASCII arrives this way as well — the station's text is Swedish. */
+    @Test
+    fun `a numeric reference above ascii decodes`() {
+        val snapshot = StationNowPlaying.parse(page("H&#xE4;ll&#246;", "Test"))
+        assertEquals("Hällö", snapshot.title)
+    }
+
+    /**
+     * One pass, not a chain: decoding `&amp;` first would turn a literal `&amp;#39;` into
+     * `&#39;` and then into an apostrophe the station never wrote.
+     */
+    @Test
+    fun `an escaped ampersand is not decoded twice`() {
+        val snapshot = StationNowPlaying.parse(page("A &amp;#39; B", "Test"))
+        assertEquals("A &#39; B", snapshot.title)
+    }
+
+    /** A stray ampersand is not an entity and must survive untouched. */
+    @Test
+    fun `text that only looks like an entity is left alone`() {
+        val snapshot = StationNowPlaying.parse(page("Rock & Roll &notanentity; 100 &#;", "Test"))
+        assertEquals("Rock & Roll &notanentity; 100 &#;", snapshot.title)
+    }
+
+    /** An out-of-range code point is nonsense; show it rather than crash or drop it. */
+    @Test
+    fun `an impossible code point is left verbatim`() {
+        val snapshot = StationNowPlaying.parse(page("bad &#xFFFFFFF; here", "Test"))
+        assertEquals("bad &#xFFFFFFF; here", snapshot.title)
+    }
 }

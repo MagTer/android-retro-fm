@@ -380,14 +380,16 @@ The station's text carries HTML entities (`Yazz &amp; The Plastic Population`, s
 2026-08-20), so the fields are unescaped before comparing — without that the ICY string's plain
 `&` never matches and the cover is silently lost.
 
-**Unfixed defect: `unescape` misses the numeric form, and it is expensive.** It lists named
-entities plus the *decimal* `&#39;`, but ASP.NET emits the **hex** `&#x27;` for an apostrophe.
-Every title with an apostrophe therefore fails `agrees` even when the page agreed perfectly —
-`no agreement — page says Nothing&#x27;s Gonna Stop Me Now` in the field log, and confirmed on
-the phone, in the car and in a direct capture. Measured cost on the 2026-08-22 corpus: **6 of
-37 agreements lost, 18 %**, and one of the six is "Wouldn't It Be Good — Nik Kershaw", the exact
-track this whole source was built for. Fix by decoding numeric character references generally
-(`&#\d+;` and `&#x[0-9a-f]+;`) rather than extending the list again. Still shipped as of 1.0.59.
+**`unescape` decodes character references by rule, not by enumeration — and that is why.** It
+used to be a chain of literal replacements listing the *decimal* `&#39;`, but ASP.NET emits the
+**hex** `&#x27;` for an apostrophe. Every title with one failed `agrees` even when the page
+agreed perfectly (`no agreement — page says Nothing&#x27;s Gonna Stop Me Now` in the field log,
+seen on the phone, in the car and in a direct capture): **6 of 37 agreements lost, 18 %** on the
+2026-08-22 corpus, one of them "Wouldn't It Be Good — Nik Kershaw", the exact track this source
+exists for. Fixed in 1.0.60 by decoding `&#nnn;`, `&#xHH;` and the named handful in **one pass**
+— chaining `&amp;` first would turn a literal `&amp;#39;` into an apostrophe the station never
+wrote. Anything unrecognised is left verbatim, so a stray `&` survives. Don't go back to a list:
+the next spelling will not be on it either.
 
 **Album art comes from iTunes Search** (`ArtworkLookup`). The mount carries no artwork, so the
 first field test of 1.0.40 showed the station logo on every track — the pipeline was fine, but
