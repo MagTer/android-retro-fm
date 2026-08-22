@@ -276,13 +276,17 @@ inventory. Three consequences that are not obvious from the code:
 - Retrofit and kotlinx-serialization are now unused by `:core` but still declared — left in
   place deliberately, since a replacement source would likely want them back.
 
-**Album art has two sources: the station's own page first, iTunes Search as the fallback.**
-`StationNowPlaying` is preferred because iTunes can only match the announced `Title - Artist`
-text, and that text is sometimes not enough to identify the *record*: "Wouldn't It Be Good - Nik
-Kershaw" resolves to the 1984 original while the station is playing a later remix and showing
-the remix sleeve. No amount of candidate scoring reaches that — the distinguishing information
-is not in the string being matched. Everything below about `ArtworkLookup` still applies; it now
-runs as the second-choice source.
+**Album art has two sources: iTunes Search first, the station's own page as the fallback when
+iTunes finds nothing** (order reversed in 1.0.60 — it was the other way round from 1.0.56).
+
+`StationNowPlaying` was preferred at first for a real reason: iTunes can only match the announced
+`Title - Artist` text, and that text is sometimes not enough to identify the *record*. "Wouldn't
+It Be Good - Nik Kershaw" resolves to the 1984 original while the station is spinning a later
+remix and showing the remix sleeve, and no amount of candidate scoring reaches that — the
+distinguishing information is not in the string being matched. **That argument is still true and
+it still lost**, on the measurement below: the page's album is worse more often than it is
+better, and its errors have no ceiling. Reversing costs the remix case, ~1 track in 37, whose
+failure mode is the right song by the right artist under an older sleeve.
 
 A plain `GET https://retrofm.se/` server-renders the current track (no JavaScript, no Blazor
 circuit, ~12.8 KB gzipped) with an album id, and `/nowPlayingMedia/albums/{id}-{th|sm|md|lg}.jpg`
@@ -354,9 +358,21 @@ returns nothing at all.
 **The asymmetry, not the score, is the argument:** the iTunes path has a scoring layer measured
 over 123 tracks; the station path has none and **cannot be given one**, so its error mode is
 unbounded while iTunes' is bounded. A recommendation to invert the priority (iTunes first,
-station only when iTunes returns nothing) was put to the maintainer on 2026-08-22 and **not yet
-decided** — it would cost the Nik Kershaw case, 1 in 37. Do not treat the current order as
-settled.
+station only when iTunes returns nothing) was put to the maintainer on 2026-08-22 and
+**accepted the same day**, knowing it costs the Nik Kershaw case. Shipped in 1.0.60.
+
+**What that means in practice: the page is now barely used.** iTunes produced a pick for 36 of
+the 37 corpus tracks, so the fallback fires on the order of one boundary in thirty — the
+measured case being "Hall & Oates – Maneater", where Apple credits "Daryl Hall & John Oates" and
+nothing matches the credit. A welcome side effect is that `retrofm.se` is no longer fetched at
+every boundary, which retires most of the per-device dependency flagged further down.
+
+**Rejected at the same time, and worth knowing why:** a hybrid that used the page only when
+iTunes' own pick was weak (null, or `ownRelease = false`). On the corpus it looked better than
+either pure order — it removes the Günther class while keeping the station's wins over
+compilations — but it was **designed from the same 37 tracks it was scored on**, and this file
+already carries two designs that a replay overturned. It was not adopted on that basis. If the
+current order disappoints, replay the hybrid against a *fresh* corpus before believing it.
 
 **And we are not fetching it wrong — that was tested, so nobody re-runs it.** The obvious
 suspicion is that a real browser sees fresher data than our prerender fetch, since retrofm.se
@@ -368,13 +384,18 @@ byte-identical fields. During the same window the page showed "Give It Up" for ~
 the mount never announced — **and the browser DOM showed it too**. The page's disagreements with
 the audio are the station's own, visible to any visitor.
 
-**The two sources run in parallel, never in sequence.** The station page is bounded by
-`STATION_ARTWORK_BUDGET_MS` (1.2 s) inside the overall `ARTWORK_FIRST_APPLY_BUDGET_MS` (1.5 s),
-so a late or disagreeing page costs nothing — the iTunes answer is already in hand when we stop
-waiting. Serial would be actively harmful: the car's modem timed out every drive's *first*
-iTunes lookup at 8 s during the week of 2026-08-13, and a second serial request would inherit
-that. All the timings above are from a **fixed line**; field coverage will be lower, and that is
-never a reason to raise the budgets.
+**The two used to run in parallel; since 1.0.60 they run in sequence, and the reason the old
+rule existed no longer applies.** Parallel was mandatory while the page was *preferred*: the
+display waited on it, and a serial second request would have inherited the car's cold-modem
+penalty — every drive's first iTunes lookup timed out at 8 s during the week of 2026-08-13. Now
+the page is only consulted **after** iTunes has come back empty, by which point the title has
+already been published with the logo and nothing is racing the display. A serial request that
+nobody is waiting for costs nothing.
+
+`ARTWORK_FIRST_APPLY_BUDGET_MS` (1.5 s) still bounds what the display waits for, and
+`STATION_ARTWORK_BUDGET_MS` (1.2 s) now bounds the fallback rather than a leg of a race. All the
+timings here are from a **fixed line**; field coverage will be lower, and that is never a reason
+to raise the budgets.
 
 The station's text carries HTML entities (`Yazz &amp; The Plastic Population`, seen live
 2026-08-20), so the fields are unescaped before comparing — without that the ICY string's plain

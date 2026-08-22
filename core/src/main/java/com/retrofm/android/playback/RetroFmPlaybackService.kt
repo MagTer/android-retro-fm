@@ -38,6 +38,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 
@@ -698,35 +699,43 @@ class RetroFmPlaybackService : MediaLibraryService() {
             // once. Applying the title first and the art second made the car flash the station
             // logo on every song (field-tested 2026-08-08).
             //
-            // Two sources, started together and never in sequence. The station's own page knows
-            // which *record* is playing — iTunes can only match the announced text, and returns
-            // the 1984 original for a remix the station is actually spinning — so it is
-            // preferred when it confirms this track. But it is the slower and less certain of
-            // the two, and the car's modem punishes a serial second request: every drive's
-            // first iTunes lookup timed out at 8 s during the week of 2026-08-13. In parallel,
-            // a station page that is late or disagreeing costs nothing, because the iTunes
-            // answer is already in hand by the time we stop waiting for it.
-            val station = async(Dispatchers.IO) {
-                StationNowPlaying.artworkUrl(track.title, track.artist)
-            }
+            // iTunes first, the station's page only when iTunes has nothing. The order was the
+            // other way around until 1.0.60 and was reversed on measured evidence, not taste —
+            // see CLAUDE.md: over 37 tracks where the page agreed about the *song* it still
+            // named a worse *record* 15 times to 8, roughly half its albums being compilations,
+            // and it produced two outright misattributions (Günther's "Pleasureman" under
+            // Samantha Fox; the Tina Turner musical under Tina Turner). The asymmetry decided
+            // it: ArtworkLookup.pick has a scoring layer tuned over 123 tracks, the page has
+            // none and cannot be given one, because it exposes no album name or album artist to
+            // check against. A bounded error beats an unbounded one.
+            //
+            // The cost is the remix case this source was built for — "Wouldn't It Be Good"
+            // resolves to the 1984 original rather than the sleeve the station is spinning. It
+            // was 1 track in 37, and its failure shows the right song by the right artist.
             val lookup = async(Dispatchers.IO) {
                 ArtworkLookup.artworkUrl(track.artist, track.title)
             }
-            val startedAt = SystemClock.elapsedRealtime()
-            val stationUrl =
-                withTimeoutOrNull(RetroFmConfig.STATION_ARTWORK_BUDGET_MS) { station.await() }
-            if (stationUrl == null) station.cancel()
-            val remaining = RetroFmConfig.ARTWORK_FIRST_APPLY_BUDGET_MS -
-                (SystemClock.elapsedRealtime() - startedAt)
-            val url = stationUrl
-                ?: if (remaining > 0) withTimeoutOrNull(remaining) { lookup.await() } else null
+            val url = withTimeoutOrNull(RetroFmConfig.ARTWORK_FIRST_APPLY_BUDGET_MS) {
+                lookup.await()
+            }
             applyTrackMetadata(url?.let { track.copy(imageUrl = it) } ?: track)
             if (url != null) return@launch
 
-            // Budget blown: the title is already out with the logo. Let the lookup finish and
-            // upgrade the cover if this is still the track being played (or the one held back
-            // by an ad break). Rare — cache hits and normal responses land inside the budget.
-            val late = runCatching { lookup.await() }.getOrNull() ?: return@launch
+            // Nothing published yet beyond the logo, so from here nothing is racing the display
+            // and the page may be asked in sequence — the objection to a serial second request
+            // (the car's cold modem timing out the first lookup of a drive) only bites when
+            // something is waiting on it. Let the lookup finish first: it may simply have been
+            // slower than the budget rather than empty.
+            val late = runCatching { lookup.await() }.getOrNull()
+                ?: withContext(Dispatchers.IO) {
+                    // The fallback proper: iTunes had no convincing candidate at all. Rare —
+                    // 1 of 37 on the measured corpus, "Hall & Oates – Maneater", where Apple
+                    // credits "Daryl Hall & John Oates" and no candidate matches the credit.
+                    withTimeoutOrNull(RetroFmConfig.STATION_ARTWORK_BUDGET_MS) {
+                        StationNowPlaying.artworkUrl(track.title, track.artist)
+                    }
+                }
+                ?: return@launch
             val stillRelevant = currentTrack?.eventId == track.eventId ||
                 pendingAdTrack?.eventId == track.eventId
             if (!stillRelevant) {
