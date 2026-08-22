@@ -100,6 +100,35 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
 - Live stream: reconnect retries indefinitely while playback is wanted and recovers on *validated*
   internet (`NET_CAPABILITY_VALIDATED`), reopening at the live edge — no stale buffer, no hard
   give-up. Don't reintroduce a fixed reconnect cap.
+- **That recovery is driven by `onPlayerError`, and a stopped Cast receiver never raises one.**
+  It changes state instead, so for a long time nothing retried it: two field sessions ended in
+  permanent silence with the player left `playWhenReady=true` in `STATE_IDLE` for *hours* while
+  the phone had validated internet (2026-08-21 22:19, receiver stalling 48 min into a session;
+  2026-08-22 07:50, a one-second `network lost`/`available` flap tearing the session down, the
+  receiver then flapping READY/IDLE three times and giving up). `retryNowIfRecovering` ran on
+  every `validated=true` callback throughout and no-oped each time, because it requires
+  `playerError != null`. **A state-only failure is invisible to an error-driven recovery** —
+  check that assumption before trusting any "it retries forever" claim.
+  - `CastStallWatchdog` covers it: at `CAST_STALL_RECOVER_MS` (45 s) re-load the stream onto the
+    receiver, at `CAST_STALL_HANDBACK_MS` (90 s) end the Cast session so the phone takes over
+    (`CAST_HANDBACK_ENABLED` kills the audible half). It is **remote-only on purpose** — see the
+    measurement in that constant's KDoc: over 14 days all 23 local stalls recovered by
+    themselves, the longest after 656 s, so a watchdog there could only cut short a recovery
+    that works.
+  - **The arming discipline is the load-bearing part, not the arithmetic.** The stall clock is
+    set by the *first* stalled observation and never restarted while the stall continues; the
+    2026-08-22 receiver flapped three times in two seconds, and a timer reset per transition
+    would never fire. `CastStallWatchdogTest` pins exactly that.
+  - **Still to evaluate (2026-08-22).** The 45 s threshold's upper bound rests on a *single*
+    sample — one 29.6 s hand-over at app start, against 32 stalls of ≤3.5 s. Re-measure once
+    more cast sessions have accumulated, and check the field logs for `cast receiver silent`
+    and `handing playback back` to see whether either step actually fires and whether the
+    hand-back is welcome or startling in practice. The episodes are `isPlaying=false` while
+    `playWhenReady=true` with `route=REMOTE`.
+  - Media3's `CastPlayer` has **no veto on the local→remote transfer**: `setTransferCallback`
+    hands you `transferState(from, to)` *while* the switch happens. So "don't switch back to a
+    receiver that isn't ready" is not implementable; the callback is wired for logging only, and
+    the hand-back above is what actually gets the audio back.
 
 ## Now-playing metadata: Bauer is dead, the station moved
 

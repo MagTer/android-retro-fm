@@ -9,6 +9,7 @@ import androidx.media3.cast.CastPlayer
 import androidx.media3.cast.RemoteCastPlayer
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.DeviceInfo
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -19,6 +20,7 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import com.google.android.gms.cast.framework.CastContext
 import com.retrofm.android.data.config.RetroFmConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -31,6 +33,24 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
     private var reconnectAttempts = 0
     private var reconnectJob: Job? = null
     private var wasPlayingBeforeError = false
+
+    /**
+     * Armed while the Cast receiver is stalled; see [RetroFmConfig.CAST_STALL_RECOVER_MS].
+     *
+     * Deliberately *not* restarted by state churn: the 2026-08-22 failure flapped READY/IDLE
+     * three times in two seconds, and a timer reset on every transition would have kept the
+     * watchdog from ever firing. It is armed once when the stall starts and cancelled only
+     * when playback actually resumes, the route goes local, or the user stops.
+     */
+    private var castStallJob: Job? = null
+
+    private val castStallWatchdog = CastStallWatchdog(
+        recoverAfterMs = RetroFmConfig.CAST_STALL_RECOVER_MS,
+        handBackAfterMs = RetroFmConfig.CAST_STALL_HANDBACK_MS,
+        handBackEnabled = RetroFmConfig.CAST_HANDBACK_ENABLED
+    )
+
+    private val appContext = context.applicationContext
 
     private val exoPlayer: ExoPlayer = ExoPlayer.Builder(
         context,
@@ -86,6 +106,21 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
             try {
                 CastPlayer.Builder(context)
                     .setLocalPlayer(exoPlayer)
+                    // Observation only — the state hand-over still runs the default way. The
+                    // route was previously visible just as onDeviceInfoChanged *after* the
+                    // fact, which is how a transfer back to a not-yet-ready receiver read as
+                    // "the app went silent for no reason" (2026-08-22). There is no veto here:
+                    // transferState is called while the switch happens, so this cannot delay
+                    // or refuse it — the recovery for a receiver that will not start is the
+                    // stall watchdog below.
+                    .setTransferCallback { from, to ->
+                        Timber.tag(TAG).i(
+                            "cast transfer: %s -> %s (state=%d playWhenReady=%b)",
+                            describePlayer(from), describePlayer(to),
+                            from.playbackState, from.playWhenReady
+                        )
+                        CastPlayer.TransferCallback.DEFAULT.transferState(from, to)
+                    }
                     .setRemotePlayer(
                         RemoteCastPlayer.Builder(context)
                             // Marks the stream LIVE for the receiver; the default converter's
@@ -211,6 +246,7 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
     fun release() {
         connectivityManager.unregisterNetworkCallback(networkCallback)
         reconnectJob?.cancel()
+        castStallJob?.cancel()
         // CastPlayer.release() also releases the wrapped local player (ExoPlayer supports
         // COMMAND_RELEASE), so releasing `player` alone is correct in both the cast and the
         // local-fallback case — no separate exoPlayer.release() (verified for media3 1.10.1).
@@ -263,6 +299,77 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
         }
     }
 
+    private fun describePlayer(p: Player): String =
+        if (p.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE) "REMOTE" else "LOCAL"
+
+    private fun onRemoteRoute(): Boolean =
+        player.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE
+
+    /** Playback is wanted, the receiver has it, and nothing is coming out. */
+    private fun castStalled(): Boolean = onRemoteRoute() && player.playWhenReady && !player.isPlaying
+
+    /**
+     * Arms or cancels the Cast stall watchdog after any event that could change the answer.
+     *
+     * The decision lives in [CastStallWatchdog] so it can be tested; this only feeds it the
+     * player's condition and carries out what it returns. While a stall is running the state
+     * is re-fed on a short poll, because the escalation is time-based and the receiver can
+     * stay silent without emitting a single further event — which is exactly what happened on
+     * 2026-08-21.
+     */
+    private fun updateCastStallWatchdog() {
+        castStallWatchdog.update(onRemoteRoute(), player.playWhenReady, player.isPlaying)
+        if (!castStalled()) {
+            castStallJob?.cancel()
+            castStallJob = null
+            return
+        }
+        if (castStallJob?.isActive == true) return      // already counting — never restart it
+        castStallJob = scope.launch {
+            while (true) {
+                delay(RetroFmConfig.CAST_STALL_POLL_MS)
+                castStallWatchdog.update(onRemoteRoute(), player.playWhenReady, player.isPlaying)
+                when (castStallWatchdog.due()) {
+                    CastStallWatchdog.Action.NONE -> if (!castStalled()) return@launch
+                    CastStallWatchdog.Action.RELOAD -> {
+                        Timber.tag(TAG).w(
+                            "cast receiver silent %d s — re-loading the stream",
+                            castStallWatchdog.stalledMs / 1000
+                        )
+                        // Reuse the error path's notion of "playback was wanted", so a later
+                        // failure lands in the same reconnect machinery, not a parallel one.
+                        wasPlayingBeforeError = true
+                        player.prepare()
+                        player.play()
+                    }
+                    CastStallWatchdog.Action.HAND_BACK -> {
+                        Timber.tag(TAG).w(
+                            "cast receiver still silent — handing playback back to this device"
+                        )
+                        handBackToLocal()
+                        return@launch
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Ends the Cast session so [CastPlayer] falls back to the local player.
+     *
+     * Isolated in its own function and guarded: `:automotive` strips the whole
+     * `com.google.android.gms` group, so CastContext does not exist there. It can only be
+     * reached from the remote route, which that build never enters, but a lone method keeps a
+     * failed class resolution from touching anything else.
+     */
+    private fun handBackToLocal() {
+        try {
+            CastContext.getSharedInstance(appContext).sessionManager.endCurrentSession(true)
+        } catch (e: Exception) {
+            Timber.tag(TAG).w("could not end the cast session: %s", e.javaClass.simpleName)
+        }
+    }
+
     private inner class PlayerEventListener : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             val name = when (playbackState) {
@@ -276,14 +383,22 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
             if (playbackState == Player.STATE_READY) {
                 reconnectAttempts = 0
             }
+            updateCastStallWatchdog()
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             Timber.tag(TAG).i("isPlaying=%b", isPlaying)
+            updateCastStallWatchdog()
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             Timber.tag(TAG).d("playWhenReady=%b reason=%d", playWhenReady, reason)
+            updateCastStallWatchdog()
+        }
+
+        // The route itself decides whether the watchdog applies at all.
+        override fun onDeviceInfoChanged(deviceInfo: DeviceInfo) {
+            updateCastStallWatchdog()
         }
 
         override fun onPlayerError(error: PlaybackException) {

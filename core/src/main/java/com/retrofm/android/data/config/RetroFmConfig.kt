@@ -273,6 +273,63 @@ object RetroFmConfig {
     const val CAST_LIVE_EDGE_NUDGE_DELAY_MS = 2_000L
 
     /**
+     * How long the Cast receiver may sit "playback wanted, nothing playing" before the stream
+     * is re-loaded onto it.
+     *
+     * The app's only recovery path used to be [androidx.media3.common.Player.Listener.onPlayerError]
+     * → scheduleReconnect. A receiver that stops does **not** raise a PlaybackException — it
+     * just changes state — so nothing ever retried. Two field failures ended in permanent
+     * silence that way (2026-08-21 22:19, the receiver stalling 48 min into a session; and
+     * 2026-08-22 07:50, a one-second network flap tearing down the session, the receiver then
+     * flapping READY/IDLE three times and giving up). In both the player was left
+     * `playWhenReady=true` in STATE_IDLE for hours while the phone had validated internet.
+     *
+     * The threshold comes from 14 days of field logs (2026-08-08…22), counting every episode
+     * where playback was wanted and `isPlaying` was false. On the remote route 33 such stalls
+     * recovered by themselves: **32 within 3.5 s**, and one at 29.6 s — the very first
+     * hand-over to the receiver, two seconds after the initial LOAD. Then nothing until the
+     * two that never recovered. 45 s sits in that empty band with >50 % margin over the one
+     * long legitimate case, the same rule of thumb as [TRACK_FROZEN_AFTER_MS].
+     *
+     * **Deliberately remote-only.** The same 14 days hold 23 local-route stalls and *every one*
+     * recovered on its own, the longest after 656 s — an 11-minute car-modem stall that came
+     * back by itself. A watchdog there would only risk cutting short a recovery that is
+     * demonstrably working, so the local route keeps the error-driven path it already has.
+     *
+     * **The upper bound rests on a single sample** (n=1 at 29.6 s), so this wants re-measuring
+     * once more cast sessions have accumulated. The episodes are visible in the field logs as
+     * `isPlaying=false` while `playWhenReady=true` with `route=REMOTE`.
+     */
+    const val CAST_STALL_RECOVER_MS = 45_000L
+
+    /**
+     * How long a stalled receiver may keep failing before the audio is handed back to the phone.
+     *
+     * Measured from the same stall start as [CAST_STALL_RECOVER_MS], so this is the *second*
+     * step: re-load first, and only if the receiver still will not play, end the Cast session
+     * so the local player takes over. A receiver that has been unplugged, or whose own network
+     * is gone, cannot be revived by any number of re-loads — and silence everywhere is the
+     * worst outcome, which is exactly what both field failures produced.
+     *
+     * **This is audible and can surprise**: the phone starts playing, possibly at a volume set
+     * while it was only a remote control. That is the accepted trade against permanent silence
+     * for a private build; [CAST_HANDBACK_ENABLED] turns it off without touching code.
+     */
+    const val CAST_STALL_HANDBACK_MS = 90_000L
+
+    /** Kill switch for the hand-back half of the Cast stall watchdog. See above. */
+    const val CAST_HANDBACK_ENABLED = true
+
+    /**
+     * How often the Cast stall watchdog re-reads the player while a stall is running.
+     *
+     * A stalled receiver can stay silent without emitting another event, so the escalation
+     * cannot be driven by callbacks alone. The poll runs only while stalled, so it costs
+     * nothing in normal playback.
+     */
+    const val CAST_STALL_POLL_MS = 1_000L
+
+    /**
      * Compensation for the station's metadata lead. Icecast splices ICY metadata into the
      * byte stream at the wall-clock moment the studio switches tracks, but the matching audio
      * passes the same stream position only after the studio→encoder→ingest pipeline — so in
