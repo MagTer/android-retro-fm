@@ -101,8 +101,13 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
   - **We announce the wrong `contentType` to the receiver and it is knowingly left that way.**
     The mount serves `audio/aacp` (raw ADTS HE-AAC, verified from its live headers 2026-08-22);
     we send `audio/mpeg`. Harmless locally — ExoPlayer sniffs — but the Default Media Receiver
-    picks its pipeline from that field, so it is a candidate for the slow flapping start (38 s
-    from transfer to stable audio on a real receiver that day). It is not a one-line fix:
+    picks its pipeline from that field. It was first suspected of causing the slow flapping
+    start; **that was wrong and the measurement says so.** Fixing the artwork URI alone took the
+    same flow — playing locally, then transferring, with the live-edge nudge firing in both
+    cases — from **38 s to 3 s**, with one clean LOAD instead of two. The receiver had been
+    failing on an image it could not fetch, landing in IDLE, and the nudge's `prepare()` then
+    re-loaded it with the wrong item. So the wrong contentType costs nothing yet measured. It is
+    still not a one-line fix:
     Cast's supported-media list documents HE-AAC only as `audio/mp4; codecs="mp4a.40.5"`, an
     MP4 container this stream does not have, and does not mention `audio/aacp` or raw ADTS at
     all — so the accurate value may simply be refused while the wrong one demonstrably plays.
@@ -111,6 +116,39 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
 - **Cast is off in the car.** `PlayerManager` never builds a `CastPlayer` on `FEATURE_AUTOMOTIVE`,
   and `:automotive` excludes the whole `com.google.android.gms` + `com.google.android.datatransport`
   dependency (their startup components trigger a "needs Google Play services" error on head units).
+- **The connect-time announcement is the only one until the track ends — never drop it.**
+  `onMetadata` ignores ICY while `playWhenReady` is false, which is right for the tail a paused
+  player keeps buffering, but the comment justifying it ("resume re-syncs at the live edge within
+  seconds") only holds while the stream is *already open*. Opened fresh a few seconds before the
+  play press, the announcement that was dropped was the whole song's only description: on
+  2026-08-22 the display sat on the station logo through all of "Material Girl" and flashed the
+  title for two seconds at the end, when the end-of-track marker finally arrived two minutes
+  later. The log tells the two apart — `icy held — playback not requested` followed by
+  `replaying held icy frame` is the healthy shape.
+  - `PendingIcyFrame` holds it for `ICY_HELD_MAX_AGE_MS` (30 s). **The expiry is load-bearing**:
+    resuming seeks to the live edge, so an older frame describes audio the player has already
+    skipped past, and replaying it would put a confidently wrong title on screen — worse than
+    branding. `PendingIcyFrameTest` pins both halves.
+- **Cast shows the station logo and "ExoPlayer Default Receiver", and that is a decision, not a
+  bug (2026-08-22).** Track info never updates on the receiver: `applyTrackMetadata` skips the
+  remote route (CAST-PLAN §2.4) *and* the Default Media Receiver genuinely cannot update
+  now-playing without a queue reload, which on a live stream would rebuffer every few minutes.
+  The name comes from `androidx.media3.cast.DefaultCastOptionsProvider`, which registers Media3's
+  own receiver app id **`A12D4273`** — we are borrowing someone else's registered app, and the
+  name shown is that registration's.
+  - **Rejected:** registering our own receiver. A Styled Media Receiver (5 USD one-time, Google
+    hosted) would fix only the name; live track info needs a Custom Web Receiver, i.e. our own
+    HTML/JS on a publicly reachable HTTPS host — a new service to run and secure. The maintainer
+    declined both on 2026-08-22: not worth paying for and not worth another deployment surface
+    for a private build. **The station logo on the receiver is therefore permanent by choice.**
+    Re-open only if that trade changes; the mechanism is understood, so no investigation is
+    needed first.
+- **Ads have been absent since the CDN move, and the ad code is now unexercised.** Zero ad
+  markers across every device in the 14 days to 2026-08-22 (`--grep "adw_ad|Reklam|ad state"`
+  over the field logs). `IcyAdMarker`, `MUTE_ADS` and the ad-state machinery still run but nothing
+  in the field has tested them against Mad Men Media's stream — the format that made them work
+  was Bauer's. Expect to redo that implementation when the station starts running ads again, and
+  do not read "ad muting works" from the absence of complaints.
 - **Ad muting is a private-circle decision, internal-only.** `RetroFmConfig.MUTE_ADS` mutes the
   broadcaster's spliced ads — acceptable for a personal internal-testing build, but it must NOT
   ship to a public/production track without resolving Retro FM/Bauer licensing (restreaming their

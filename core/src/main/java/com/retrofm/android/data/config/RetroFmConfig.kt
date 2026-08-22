@@ -273,6 +273,26 @@ object RetroFmConfig {
     const val CAST_LIVE_EDGE_NUDGE_DELAY_MS = 2_000L
 
     /**
+     * How long an ICY frame that arrived before the play press stays usable.
+     *
+     * The mount announces the current title once when the stream opens and then not again
+     * until the track ends, so a frame that lands in the gap between opening the stream and
+     * the user pressing play is the only description of that whole song. Dropping it cost the
+     * display an entire track on 2026-08-22: `icy ignored — playback not requested` at
+     * 10:53:51, play at 10:53:55, and nothing else until "Material Girl" signalled its own end
+     * at 10:55:54 — two minutes of station logo.
+     *
+     * It expires because resuming seeks to the live edge (see PlayGatedPlayer): a frame held
+     * long enough describes audio the player has skipped past, and replaying it would put a
+     * stale title on screen with full confidence — worse than showing branding. The measured
+     * case needed 4 s; 30 s covers "open the stream, then press play" with a wide margin while
+     * staying far below the length of a song.
+     *
+     * See [com.retrofm.android.playback.PendingIcyFrame].
+     */
+    const val ICY_HELD_MAX_AGE_MS = 30_000L
+
+    /**
      * `contentType` announced to the Cast receiver. **Known to be wrong, deliberately left
      * alone until it can be measured — do not "fix" it blind.**
      *

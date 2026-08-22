@@ -59,6 +59,9 @@ class RetroFmPlaybackService : MediaLibraryService() {
 
     /** Armed by the mount's end-of-track marker; see [armHandoverTimeout]. */
     private var handoverJob: Job? = null
+
+    /** An announcement that arrived before the play press — see [PendingIcyFrame]. */
+    private val pendingIcy = PendingIcyFrame<Metadata>(RetroFmConfig.ICY_HELD_MAX_AGE_MS)
     private var currentTrack: TrackInfo? = null
 
     /**
@@ -512,7 +515,13 @@ class RetroFmPlaybackService : MediaLibraryService() {
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             // Fires at the play press itself, seconds before audio starts — the earliest
             // moment to swap a previous drive's song off the screen.
-            if (playWhenReady) maybeHandleIdleGap()
+            if (playWhenReady) {
+                maybeHandleIdleGap()
+                // After the idle reset, so a held frame wins over the branding it just applied.
+                drainPendingIcy()
+            } else {
+                pendingIcy.clear()
+            }
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -521,6 +530,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
                 // Also here, not only at the play press: after a suspend mid-playback the car
                 // resumes with playWhenReady still true, so onPlayWhenReadyChanged never fires.
                 maybeHandleIdleGap()
+                drainPendingIcy()
                 startPlaybackHeartbeat()
             } else {
                 stopPlaybackHeartbeat()
@@ -570,28 +580,52 @@ class RetroFmPlaybackService : MediaLibraryService() {
             // No ICY processing unless playback is wanted. Normally the PlayGatedPlayer means
             // the stream isn't even open before play, but a paused player keeps buffering its
             // tail for a while — those frames must not fetch eventdata, flip metadata, or
-            // engage ad state. Resume re-syncs at the live edge within seconds.
+            // engage ad state.
+            //
+            // Held rather than dropped, because "resume re-syncs within seconds" — what this
+            // comment used to claim — is only true while the stream is already open. Opened
+            // fresh, the mount's connect-time announcement is the ONLY one until the track
+            // ends, and losing it costs the whole song (2026-08-22, "Material Girl": two
+            // minutes of station logo). See PendingIcyFrame for why it expires.
             if (!playerManager.player.playWhenReady) {
-                Timber.tag("NowPlaying").d("icy ignored — playback not requested")
+                pendingIcy.hold(metadata)
+                Timber.tag("NowPlaying").d("icy held — playback not requested")
                 return
             }
-            for (i in 0 until metadata.length()) {
-                val icy = metadata.get(i) as? IcyInfo ?: continue
-                val durationMs = IcyAdMarker.parseDurationMs(icy.rawMetadata)
-                if (durationMs != null) {
-                    // The tail extends both the mute and the "Reklam" label so they lift
-                    // together (see RetroFmConfig.AD_MUTE_TAIL_MS).
-                    setAdState(
-                        SystemClock.elapsedRealtime() + durationMs + RetroFmConfig.AD_MUTE_TAIL_MS
-                    )
-                } else {
-                    // Regular metadata doubles as the ad-end signal — music is audibly
-                    // resuming, so ease the volume back instead of a hard cut.
-                    clearAdState(fade = true)
-                    onIcyTrackMetadata(icy)
-                }
+            handleIcyMetadata(metadata)
+        }
+
+    }
+
+    private fun handleIcyMetadata(metadata: Metadata) {
+        for (i in 0 until metadata.length()) {
+            val icy = metadata.get(i) as? IcyInfo ?: continue
+            val durationMs = IcyAdMarker.parseDurationMs(icy.rawMetadata)
+            if (durationMs != null) {
+                // The tail extends both the mute and the "Reklam" label so they lift
+                // together (see RetroFmConfig.AD_MUTE_TAIL_MS).
+                setAdState(
+                    SystemClock.elapsedRealtime() + durationMs + RetroFmConfig.AD_MUTE_TAIL_MS
+                )
+            } else {
+                // Regular metadata doubles as the ad-end signal — music is audibly
+                // resuming, so ease the volume back instead of a hard cut.
+                clearAdState(fade = true)
+                onIcyTrackMetadata(icy)
             }
         }
+    }
+
+    /**
+     * Replays the announcement that arrived just before the play press, if it is still fresh.
+     *
+     * Idempotent: [PendingIcyFrame.take] empties the slot, so being called from both the play
+     * press and the first isPlaying costs nothing — the second call finds nothing.
+     */
+    private fun drainPendingIcy() {
+        val held = pendingIcy.take() ?: return
+        Timber.tag("NowPlaying").d("replaying held icy frame")
+        handleIcyMetadata(held)
     }
 
     /**
@@ -623,6 +657,8 @@ class RetroFmPlaybackService : MediaLibraryService() {
      *
      * The mount also announces the current title on connect, not just at changes, which is why
      * no schedule fetch is needed to recover the display after a reconnect or an ad break.
+     * That announcement is the **only** one until the track ends, so it must not be dropped —
+     * when it lands before the play press it is held rather than ignored (see [PendingIcyFrame]).
      */
     private fun onIcyTrackMetadata(icy: IcyInfo) {
         Timber.tag("NowPlaying").d("icy boundary: title='%s'", icy.title)
