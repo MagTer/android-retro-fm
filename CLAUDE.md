@@ -113,6 +113,18 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
     all — so the accurate value may simply be refused while the wrong one demonstrably plays.
     `RetroFmConfig.CAST_CONTENT_TYPE` is the knob and carries the three candidates; change it,
     cast once, and measure the gap between `cast transfer: LOCAL -> REMOTE` and `isPlaying=true`.
+  - **Latent and unfixed: `nudgeCastToLiveEdge` can re-LOAD the receiver with the wrong item.**
+    When it fires against a receiver sitting in `STATE_IDLE`, `play()` goes through
+    `PlayGatedPlayer`'s IDLE branch into `prepare()`, and the resulting second LOAD carried the
+    *station branding* rather than the current track (2026-08-21: LOAD #1 "If You Don't Know Me
+    By Now", LOAD #2 "Retro FM" four seconds later — the picture visibly jumping). Since the
+    receiver cannot be sent new metadata afterwards, whatever that last LOAD carried is what it
+    shows for the whole session. The trigger became rare once the artwork URI was fixed, so it
+    was left alone; the cause was never established, and the plausible one — that the re-load
+    reads the CastPlayer wrapper's own timeline, which still holds the item set at construction
+    rather than the one `replaceMediaItem` gave the active player — is a **hypothesis, not a
+    finding.** It also seeks a stream that has no seekable range, which Cast's live guidance
+    (seek to `LiveSeekableRange.end`) does not cover.
 - **Cast is off in the car.** `PlayerManager` never builds a `CastPlayer` on `FEATURE_AUTOMOTIVE`,
   and `:automotive` excludes the whole `com.google.android.gms` + `com.google.android.datatransport`
   dependency (their startup components trigger a "needs Google Play services" error on head units).
@@ -284,6 +296,11 @@ constraint.** Measured across 32 boundaries on 2026-08-20:
 - Page lag behind the mount, upper bounds of the twelve agreements: **0.20, 0.23, 0.23, 0.48,
   0.60, 0.68, 0.82, 0.84, 0.87, 0.92, 1.51, 2.18 s** — ten of thirteen inside one second. An
   earlier capture said "≈5.3 s" for five of them; that was a 5 s polling step, not the site.
+  **Do not read that as the worst case — it is the good case.** A 55-boundary capture on
+  2026-08-22 found the page running a *whole track* behind for long stretches: 12 of 55
+  boundaries, and **9 of the last 11 across a 45-minute run** where it consistently showed the
+  previous song. The car saw the same window from the road. `agrees` rejects all of it, so it
+  costs the full 1.2 s budget per boundary and buys nothing; it is a cost, not a wrong cover.
 - The **first** fetch after a boundary is usually not the one that agrees: right immediately 6
   times, no player block at all 3 times, still showing another track 4 times. A second fetch a
   few hundred ms later takes it from 6/13 to 10/13, hence `STATION_NOWPLAYING_ATTEMPTS`.
@@ -298,6 +315,45 @@ disagreement returns null and iTunes takes over. That guard is load-bearing, not
 without it the two stale-page cases would have put Art Garfunkel's cover on Jon Secada and Donna
 Summer's on Whitney Houston. **Never relax it into a title-only match.**
 
+**The guard checks the *track*, and the station can still name the wrong *album*. That is the
+open question about this whole source.** `agrees` confirms the page is describing the song we
+are about to display; it cannot check what record the album id points at, and the page offers
+nothing to check it with — no album name, no album artist (the cover `<img>`'s `alt` is the
+track title; markup read 2026-08-22). Two field cases where the page agreed perfectly and the id
+was simply wrong upstream:
+
+- **Günther's "Pleasureman" for Samantha Fox – "Touch Me (I Want Your Body)"** (2026-08-22, the
+  first track the source ever served). Presumably a title match on "Touch Me".
+- **"Tina: The Tina Turner Musical (Original Cast Recording)" for Tina Turner – "The Best"** —
+  a cast recording, not her.
+
+**Measured head-to-head, 37 tracks where the page agreed** (captured over 4 h, then each cover
+fetched and judged against what `ArtworkLookup.pick` chose for the same track — scored by the
+app's own Kotlin, not a re-implementation): **station better 8, tie 14, iTunes better 15**, plus
+the one gross misattribution above. Roughly half the station's albums are compilations ("The
+Essential…", "Greatest Hits", "Platinum & Gold Collection") — the very category `pick` was tuned
+over 123 tracks to avoid. Where the station wins it wins alone: the **Nik Kershaw remix sleeve**
+(the founding case, confirmed live), Kiss → *Dynasty* over a best-of, Carl Douglas, Pet Shop
+Boys → *Introspective*, Sandra, Yazoo, the ABBA single sleeve, and Hall & Oates where iTunes
+returns nothing at all.
+
+**The asymmetry, not the score, is the argument:** the iTunes path has a scoring layer measured
+over 123 tracks; the station path has none and **cannot be given one**, so its error mode is
+unbounded while iTunes' is bounded. A recommendation to invert the priority (iTunes first,
+station only when iTunes returns nothing) was put to the maintainer on 2026-08-22 and **not yet
+decided** — it would cost the Nik Kershaw case, 1 in 37. Do not treat the current order as
+settled.
+
+**And we are not fetching it wrong — that was tested, so nobody re-runs it.** The obvious
+suspicion is that a real browser sees fresher data than our prerender fetch, since retrofm.se
+holds a Blazor circuit. Driving the real page in headless Chromium and comparing the live DOM
+against a simultaneous prerender fetch, 42 samples: **track title identical in 31 of 34, album id
+identical in 39 of 40**, and the only difference had the *prerender ahead*. Cloudflare does not
+cache it (`cf-cache-status: DYNAMIC`, `no-store`, no `age`) and a browser User-Agent gets
+byte-identical fields. During the same window the page showed "Give It Up" for ~100 s — a track
+the mount never announced — **and the browser DOM showed it too**. The page's disagreements with
+the audio are the station's own, visible to any visitor.
+
 **The two sources run in parallel, never in sequence.** The station page is bounded by
 `STATION_ARTWORK_BUDGET_MS` (1.2 s) inside the overall `ARTWORK_FIRST_APPLY_BUDGET_MS` (1.5 s),
 so a late or disagreeing page costs nothing — the iTunes answer is already in hand when we stop
@@ -309,6 +365,15 @@ never a reason to raise the budgets.
 The station's text carries HTML entities (`Yazz &amp; The Plastic Population`, seen live
 2026-08-20), so the fields are unescaped before comparing — without that the ICY string's plain
 `&` never matches and the cover is silently lost.
+
+**Unfixed defect: `unescape` misses the numeric form, and it is expensive.** It lists named
+entities plus the *decimal* `&#39;`, but ASP.NET emits the **hex** `&#x27;` for an apostrophe.
+Every title with an apostrophe therefore fails `agrees` even when the page agreed perfectly —
+`no agreement — page says Nothing&#x27;s Gonna Stop Me Now` in the field log, and confirmed on
+the phone, in the car and in a direct capture. Measured cost on the 2026-08-22 corpus: **6 of
+37 agreements lost, 18 %**, and one of the six is "Wouldn't It Be Good — Nik Kershaw", the exact
+track this whole source was built for. Fix by decoding numeric character references generally
+(`&#\d+;` and `&#x[0-9a-f]+;`) rather than extending the list again. Still shipped as of 1.0.59.
 
 **Album art comes from iTunes Search** (`ArtworkLookup`). The mount carries no artwork, so the
 first field test of 1.0.40 showed the station logo on every track — the pipeline was fine, but
@@ -376,6 +441,21 @@ started appearing in the log:
   self-titled album sitting at rank 1 (field-reported 2026-08-12). `artistKey` drops standalone
   "and" on both sides, which is also what keeps "Mike & The Mechanics" matching Apple's
   "Mike + The Mechanics".
+
+**Two more credit shapes that reach nothing, both found 2026-08-22 and both still open:**
+
+- *A short form Apple spells out in full.* The station announces "Hall & Oates"; Apple credits
+  "Daryl Hall & John Oates". Whole-word containment needs the wanted credit to appear as a *run*
+  inside the candidate's, and `hall oates` is not a run of `daryl hall john oates` — the words
+  are interleaved. The `leadArtist` retry does not help, because the problem is the comparison
+  and not the query: searching "Hall Maneater" still returns rows credited the long way.
+  `ArtworkLookup.pick` returned **no match at all**, so the station's cover was the only reason
+  Maneater had one.
+- *A name the station splits into two words.* "Six Pence None The Richer" against Apple's
+  "Sixpence None the Richer" — a space, not a typo, and `artistKey` cannot bridge it. Logged as
+  `no match (15 candidates)`, and the page happened to be a track behind at that moment, so the
+  song showed the station logo. Related to the known "the station's own typos" case below but
+  more tractable; leave it until the log shows more than one.
 
 **A dotted acronym is a mismatch, not a near miss — and it produces a *wrong* cover, not a
 logo.** Punctuation becoming whitespace splits "U.S.A." into three single-letter words, so
@@ -455,6 +535,20 @@ reasons that are not yours: where two candidates tie on every term, `-index` dec
 reorders between then and now (seen on Queen and Rick Astley, 2026-08-17). A tiebreak resting
 on Apple's ordering is not reproducible — do not chase those as bugs.
 
+Two mechanics that make a replay describe the app rather than the harness (learned 2026-08-22):
+
+- **Score with `ArtworkLookup.pick` itself, never a re-implementation.** A Python copy of the
+  scoring compares *that copy* to the station, not the app — and the scoring is the part with
+  123 tracks of tuning in it. Drive the real thing from a throwaway JUnit test that reads the
+  captured corpus as TSV and writes the picks back out; delete it afterwards. Note that the test
+  JVM inherits the **Gradle daemon's** environment, so an exported shell variable never reaches
+  it — pass the path some other way.
+- **Include the `leadArtist` retry or you will undersell iTunes.** `artworkUrl` searches a second
+  time with the lead credit when the first query finds nothing, and a corpus fetched with only
+  the full credit misses it: "John Travolta + Olivia Newton-John" scored as a miss until the
+  retry query was fetched too, after which it resolved. Fetch the retry for every track that
+  comes back empty, and keep scoring against the **full** credit.
+
 That replay has a measured rate limit: 41 queries at 1.2 s spacing earned a **429** on the
 42nd (2026-08-12). Space a corpus replay several seconds apart, and if one does trip, wait it
 out rather than retrying — the app's own budget is one request per track boundary, and a
@@ -499,6 +593,16 @@ song ends" symptom, not a second chance worth designing around.
 
 **The mount re-announces a title mid-track.** Confirmed 2026-08-09: the same `StreamTitle`
 arrives again 50–90 s into a song (`apply skipped (dedup)` when the metadata is unchanged).
+
+**Since the station page was added, that repeat can swap the cover mid-song — unfixed.** The
+repeat runs the full boundary path, which was harmless when there was one artwork source and a
+cache: the second lookup returned the same URL and dedup swallowed it. Now the page is consulted
+again, and a repeat is *by definition* an end-of-track marker, so the page has usually already
+moved to the next song and `agrees` correctly says no — after which the iTunes cover is applied
+over a station cover that was already right. Seen three times on 2026-08-21 (Let It Be, The One
+And Only, Have You Ever Seen The Rain?); the direction varies, so the bug is the unpredictable
+flip, not that the result is always worse. A repeat should only be allowed to *add* artwork the
+track does not yet have, never to replace what is already resolved.
 Two consequences. It is *not* a reconnect, so don't read it as one. And it is what made the
 first-lookup failures self-heal before the retry existed — the re-announcement re-ran the
 lookup, so the cover appeared roughly three minutes late, right as the song ended and the
