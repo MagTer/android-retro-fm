@@ -329,12 +329,16 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
             while (true) {
                 delay(RetroFmConfig.CAST_STALL_POLL_MS)
                 castStallWatchdog.update(onRemoteRoute(), player.playWhenReady, player.isPlaying)
+                // Read before due(), which clears the clock when it hands back. The number is
+                // the point: it is what showed a re-load firing at 139 s instead of 45
+                // (2026-08-23), so it belongs on BOTH escalation lines — otherwise the next
+                // one has to be diagnosed by subtracting log timestamps.
+                val stalledSeconds = castStallWatchdog.stalledMs / 1000
                 when (castStallWatchdog.due()) {
                     CastStallWatchdog.Action.NONE -> if (!castStalled()) return@launch
                     CastStallWatchdog.Action.RELOAD -> {
                         Timber.tag(TAG).w(
-                            "cast receiver silent %d s — re-loading the stream",
-                            castStallWatchdog.stalledMs / 1000
+                            "cast receiver silent %d s — re-loading the stream", stalledSeconds
                         )
                         // Reuse the error path's notion of "playback was wanted", so a later
                         // failure lands in the same reconnect machinery, not a parallel one.
@@ -344,7 +348,8 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
                     }
                     CastStallWatchdog.Action.HAND_BACK -> {
                         Timber.tag(TAG).w(
-                            "cast receiver still silent — handing playback back to this device"
+                            "cast receiver still silent %d s — handing playback back to this device",
+                            stalledSeconds
                         )
                         handBackToLocal()
                         return@launch

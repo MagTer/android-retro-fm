@@ -197,12 +197,37 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
     set by the *first* stalled observation and never restarted while the stall continues; the
     2026-08-22 receiver flapped three times in two seconds, and a timer reset per transition
     would never fire. `CastStallWatchdogTest` pins exactly that.
-  - **Still to evaluate (2026-08-22).** The 45 s threshold's upper bound rests on a *single*
-    sample — one 29.6 s hand-over at app start, against 32 stalls of ≤3.5 s. Re-measure once
-    more cast sessions have accumulated, and check the field logs for `cast receiver silent`
-    and `handing playback back` to see whether either step actually fires and whether the
-    hand-back is welcome or startling in practice. The episodes are `isPlaying=false` while
+  - **It works: first confirmed field save 2026-08-23 11:27:31**, `cast receiver silent 139 s
+    — re-loading the stream` followed by `READY` + `isPlaying=true` one second later. The
+    hand-back half has still never fired.
+  - **But the poll is not punctual, and the escalation used to assume it was.** That save came
+    at **139 s**, not 45: `CAST_STALL_POLL_MS` is a coroutine `delay`, and while casting the
+    phone plays nothing itself and holds no wake lock, so nothing keeps the CPU awake to
+    service it. Both clocks agree on the number — the log timestamp and the watchdog's own
+    `stalledMs` are the same device wall clock — so the loop genuinely did not tick for ~94 s.
+    Corroborating but not proof: a `Network capabilities` callback fires in the *same second*
+    after being equally silent, which looks like one wake-up releasing both.
+    - So **`CAST_STALL_RECOVER_MS` is a floor on how long a stall must last, never a bound on
+      when the watchdog is asked.** Anything timed off the stall start inherits that.
+    - `CAST_STALL_HANDBACK_MS` was measured from the stall start, so at 139 s the hand-back was
+      already overdue and the *next* tick would have ended the Cast session — one second of
+      grace instead of forty-five. It only escaped because that re-load worked. **The
+      hand-back is now timed from the re-load** (grace = the difference between the two
+      constants, so a punctual escalation is bit-for-bit unchanged). Fixed 2026-08-23.
+    - Not attempted: making the poll itself punctual. That means an AlarmManager or a wake
+      lock held while the phone is only a remote control, which costs battery on every cast
+      session to buy precision on a path that already recovers. Re-open only if a hand-back is
+      ever needed and arrives far too late to help.
+  - **Still to evaluate.** The 45 s threshold's upper bound rests on a *single* sample — one
+    29.6 s hand-over at app start, against 32 stalls of ≤3.5 s. A 4 h 19 min cast session on
+    2026-08-23 added five more self-recovering stalls, **all ≤1 s**, so the empty band
+    3.5–29.6 s is still unpopulated and the upper bound is still n=1. Keep checking the field
+    logs for `cast receiver silent` and `handing playback back`, and whether the hand-back is
+    welcome or startling in practice. The episodes are `isPlaying=false` while
     `playWhenReady=true` with `route=REMOTE`.
+  - **The logs never name the receiver.** Neither the transfer lines nor the LOAD payload say
+    which device a session is on, so "analyse these cast sessions" cannot separate a Nest Hub
+    from a speaker. Worth adding the next time this area is touched.
   - Media3's `CastPlayer` has **no veto on the local→remote transfer**: `setTransferCallback`
     hands you `transferState(from, to)` *while* the switch happens. So "don't switch back to a
     receiver that isn't ready" is not implementable; the callback is wired for logging only, and

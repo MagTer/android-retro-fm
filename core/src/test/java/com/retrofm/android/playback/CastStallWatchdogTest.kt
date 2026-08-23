@@ -5,8 +5,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * Pins the two field failures that produced permanent silence while casting, and the flapping
- * that would defeat a naive implementation of the fix.
+ * Pins the two field failures that produced permanent silence while casting, the flapping that
+ * would defeat a naive implementation of the fix, and the late poll that would defeat the
+ * escalation.
  *
  * [PlayerManager] has no test harness, which is why the decision was extracted at all.
  */
@@ -60,7 +61,37 @@ class CastStallWatchdogTest {
         clock += 20_000                                  // 66 s — hand-back not due yet
         assertEquals(Action.NONE, w.due())
 
-        clock += 30_000                                  // 96 s
+        // 96 s: 50 s after the re-load, so the 45 s grace has passed. A punctual escalation
+        // is unchanged by timing the hand-back from the re-load rather than the stall start.
+        clock += 30_000
+        assertEquals(Action.HAND_BACK, w.due())
+    }
+
+    /**
+     * 2026-08-23 11:25:12, the second case that decides the design: the poll is not punctual.
+     *
+     * The receiver stalled on the phone and the re-load did not fire until **139 s**, because
+     * the 1 s poll is a coroutine `delay` and nothing keeps the CPU awake while casting. When
+     * the hand-back was measured from the stall start, 90 s was already long past at that
+     * moment — so the very next tick would have ended the Cast session, giving the receiver
+     * one second to answer instead of forty-five. It only escaped because the re-load worked.
+     */
+    @Test
+    fun `a late re-load still leaves the receiver its full grace period`() {
+        val w = watchdog()
+        w.update(remote = true, playWhenReady = true, playing = false)
+
+        clock += 139_000                                 // the poll did not run for 139 s
+        w.update(remote = true, playWhenReady = true, playing = false)
+        assertEquals(Action.RELOAD, w.due())
+
+        clock += 1_000                                   // the next tick must NOT hand back
+        assertEquals(Action.NONE, w.due())
+
+        clock += 43_000                                  // 44 s after the re-load: still not due
+        assertEquals(Action.NONE, w.due())
+
+        clock += 2_000                                   // 46 s after the re-load
         assertEquals(Action.HAND_BACK, w.due())
     }
 

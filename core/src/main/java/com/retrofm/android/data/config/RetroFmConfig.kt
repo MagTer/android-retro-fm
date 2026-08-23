@@ -353,11 +353,19 @@ object RetroFmConfig {
     /**
      * How long a stalled receiver may keep failing before the audio is handed back to the phone.
      *
-     * Measured from the same stall start as [CAST_STALL_RECOVER_MS], so this is the *second*
-     * step: re-load first, and only if the receiver still will not play, end the Cast session
-     * so the local player takes over. A receiver that has been unplugged, or whose own network
-     * is gone, cannot be revived by any number of re-loads — and silence everywhere is the
-     * worst outcome, which is exactly what both field failures produced.
+     * This is the *second* step: re-load first, and only if the receiver still will not play,
+     * end the Cast session so the local player takes over. A receiver that has been unplugged,
+     * or whose own network is gone, cannot be revived by any number of re-loads — and silence
+     * everywhere is the worst outcome, which is exactly what both field failures produced.
+     *
+     * **Read as an offset from a punctual stall, but applied from the re-load.** The value the
+     * receiver actually gets is the difference, `this - CAST_STALL_RECOVER_MS` (45 s), counted
+     * from the moment the re-load was sent — so a stall observed at t=0 still re-loads at 45 s
+     * and hands back at 90 s, while a *late* re-load still leaves a full grace period. It was
+     * measured from the stall start until 2026-08-23, when a field stall re-loaded at 139 s
+     * because the watchdog's poll had not run: the hand-back was then already overdue and
+     * would have fired on the next tick, one second later. [CastStallWatchdog] carries the
+     * episode.
      *
      * **This is audible and can surprise**: the phone starts playing, possibly at a volume set
      * while it was only a remote control. That is the accepted trade against permanent silence
