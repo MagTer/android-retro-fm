@@ -19,9 +19,9 @@ import org.robolectric.annotation.Config
  * renders only local URIs. Until 2026-08-22 the LOAD payload was sent with
  * `content://com.magter.retrofm.artwork/…` and the receiver could never show a cover.
  *
- * Only the rewrite is testable here — building the real MediaQueueItem needs Play services,
- * which is not on the JVM classpath, so the payload itself is verified in the field logs
- * (`RetroFmCast LOAD payload`).
+ * Only the two rewrites are testable here — building the real MediaQueueItem needs Play
+ * services, which is not on the JVM classpath, so the payload itself is verified in the field
+ * logs (`RetroFmCast LOAD payload`).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -67,5 +67,50 @@ class RetroFmMediaItemConverterTest {
     fun `a plain https cover is left alone`() {
         val direct = Uri.parse(cover)
         assertEquals(direct, converter.forReceiver(itemWithArtwork(direct)).mediaMetadata.artworkUri)
+    }
+
+    /**
+     * The receiver's form must not become the session's. Media3's own converter rebuilds the
+     * MediaMetadata from the Cast metadata, artwork included, so without this the https URL we
+     * sent comes straight back as the shared item's artworkUri — observed in the field on
+     * 2026-08-23 11:24:37 as `loadBitmap https://media.bauerradio.com/image/upload/…` where
+     * every local-route load logs the `content://` form.
+     */
+    @Test
+    fun `the receiver's https cover is mapped back to a content uri`() {
+        val local = AlbumArtContentProvider.mapUri(Uri.parse(cover))
+        val backIn = converter.forSession(itemWithArtwork(Uri.parse(cover)))
+        assertEquals(local, backIn.mediaMetadata.artworkUri)
+    }
+
+    /** The round trip is what matters: out to the receiver and back in must be the identity. */
+    @Test
+    fun `a cast round trip leaves the artwork exactly as it started`() {
+        val local = AlbumArtContentProvider.mapUri(Uri.parse(cover))
+        val out = converter.forReceiver(itemWithArtwork(local))
+        assertEquals(local, converter.forSession(out).mediaMetadata.artworkUri)
+    }
+
+    /**
+     * A queue item this app never built can carry any cover. Mapping it would hand the session
+     * a content:// that openFile then refuses — a cover that would have rendered becomes
+     * nothing at all, which is worse than leaving it alone.
+     */
+    @Test
+    fun `a cover this provider cannot serve is left as it is`() {
+        val foreign = Uri.parse("https://example.com/someone-elses-cover.jpg")
+        assertEquals(foreign, converter.forSession(itemWithArtwork(foreign)).mediaMetadata.artworkUri)
+    }
+
+    /** A content:// artwork must never be wrapped a second time. */
+    @Test
+    fun `an item already carrying a content uri is untouched`() {
+        val local = AlbumArtContentProvider.mapUri(Uri.parse(cover))
+        assertEquals(local, converter.forSession(itemWithArtwork(local)).mediaMetadata.artworkUri)
+    }
+
+    @Test
+    fun `an item without artwork survives the way back too`() {
+        assertNull(converter.forSession(itemWithArtwork(null)).mediaMetadata.artworkUri)
     }
 }

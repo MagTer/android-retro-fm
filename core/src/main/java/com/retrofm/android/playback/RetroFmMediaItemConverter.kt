@@ -19,7 +19,8 @@ import com.google.android.gms.cast.MediaQueueItem
  *  - **contentId as the real stream URL**, because that receiver treats contentId as the media
  *    URL and may ignore the newer contentUrl.
  *  - **Artwork as a reachable https URL** rather than the `content://` proxy Automotive needs
- *    — see [forReceiver].
+ *    — see [forReceiver], and [forSession] for why that rewrite must be undone on the way
+ *    back in.
  *
  * The customData that round-trips the Media3 MediaItem is preserved from the default
  * conversion, so [toMediaItem] still restores the original item.
@@ -58,7 +59,7 @@ class RetroFmMediaItemConverter : MediaItemConverter {
     }
 
     override fun toMediaItem(mediaQueueItem: MediaQueueItem): MediaItem =
-        delegate.toMediaItem(mediaQueueItem)
+        forSession(delegate.toMediaItem(mediaQueueItem))
 
     /**
      * Rewrites the artwork back to the URL it came from, because the receiver is a different
@@ -85,6 +86,40 @@ class RetroFmMediaItemConverter : MediaItemConverter {
         return mediaItem.buildUpon()
             .setMediaMetadata(
                 mediaItem.mediaMetadata.buildUpon().setArtworkUri(remote).build()
+            )
+            .build()
+    }
+
+    /**
+     * Undoes [forReceiver] on the way back in, so the receiver's form of the artwork never
+     * becomes the session's.
+     *
+     * [DefaultMediaItemConverter.toMediaItem] rebuilds the MediaMetadata from the Cast
+     * metadata, and that includes `setArtworkUri(metadata.images[0].url)` — so the https URL
+     * we sent the receiver comes straight back and becomes the item the whole app reads.
+     * Observed 2026-08-23 11:24:37: right after a transfer the session's BitmapLoader logged
+     * `loadBitmap https://media.bauerradio.com/image/upload/…`, the raw URL, where every
+     * local-route load logs the `content://` form.
+     *
+     * On the phone that still renders, which is why it went unnoticed. It is wrong anyway:
+     * the whole point of the seam is that **only the Cast payload carries the remote URL** —
+     * an https artworkUri leaking into the shared item is the Automotive rule broken from the
+     * other side, and it is one round-trip away from any surface that renders local URIs only.
+     * It also puts a ~110-character URL in a log line that is otherwise ~40.
+     *
+     * Only hosts [AlbumArtContentProvider] will actually serve are mapped back. Mapping an
+     * arbitrary URL would hand the session a `content://` that `openFile` then refuses,
+     * turning a cover that would have rendered into nothing — and the queue can hold items
+     * this app never built.
+     */
+    internal fun forSession(mediaItem: MediaItem): MediaItem {
+        val art = mediaItem.mediaMetadata.artworkUri ?: return mediaItem
+        if (!AlbumArtContentProvider.servesHost(art.host)) return mediaItem
+        return mediaItem.buildUpon()
+            .setMediaMetadata(
+                mediaItem.mediaMetadata.buildUpon()
+                    .setArtworkUri(AlbumArtContentProvider.mapUri(art))
+                    .build()
             )
             .build()
     }

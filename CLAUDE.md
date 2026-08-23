@@ -91,6 +91,26 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
     already where LIVE stream type and `contentId` are fixed — never in `buildStationItem` and
     never as a route check in the service, which would spread Cast knowledge across surfaces
     that do not care.
+  - **And it has to be undone on the way back in, which was missed until 2026-08-23.**
+    Media3's `DefaultMediaItemConverter.toMediaItem` rebuilds the MediaMetadata from the Cast
+    metadata — `setArtworkUri(metadata.images[0].url)` — and `CastTimelineTracker` is what
+    calls it, so whatever the receiver was sent becomes the session's current MediaItem. The
+    https URL we deliberately put in the payload came straight back into the shared item. The
+    tell in the field log is the artwork line changing shape: `loadBitmap
+    https://media.bauerradio.com/image/upload/…` right after a transfer (2026-08-23 11:24:37)
+    where every local-route load reads `loadBitmap media.bauerradio.com/dwxxo0kehcboelrutfnm.png`
+    — `describe` only shortens our own `content://` URIs, so a long line *is* the symptom.
+    `forSession` maps it back, and `RetroFmMediaItemConverterTest` pins the round trip as the
+    identity.
+    - It rendered fine on the phone, which is why it survived. It is still the Automotive rule
+      broken from the other side — a raw `https` `artworkUri` in the shared item, one
+      round-trip away from a surface that renders local URIs only — and it put a
+      ~110-character URL in a log line that is otherwise ~40.
+    - **Only allowlisted hosts are mapped back.** The Cast queue can hold items this app never
+      built; wrapping an arbitrary URL would hand the session a `content://` that `openFile`
+      then refuses, turning a cover that would have rendered into nothing. The rule lives once,
+      in `AlbumArtContentProvider.servesHost` — `AlbumArtHostAllowlistTest` used to keep its
+      own copy of the allowlist and now calls that instead.
   - **Device type is deliberately not consulted.** Cast's only hard rule for audio-only
     devices (Home Mini) is "do not send a *video* stream"; metadata images are simply ignored
     by a device with no screen, and the "avoid image assets" advice in Google's audio guide is

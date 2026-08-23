@@ -10,24 +10,15 @@ import java.net.URI
  * placeholder, because AlbumArtContentProvider's host allowlist did not include Apple's CDN and
  * openFile blocked every cover.
  *
- * The allowlist itself is private to the provider (and the provider needs an Android runtime to
- * instantiate), so this asserts the same rule against the hosts the app actually produces. If a
- * new artwork source is added, add its host here and to ALLOWED_HOSTS together.
+ * This asserts the provider's own rule against the hosts the app actually produces. It used to
+ * mirror ALLOWED_HOSTS and its suffix match in a private copy here; that copy became a real
+ * drift risk once RetroFmMediaItemConverter.forSession started asking the same question, so the
+ * rule now lives once in AlbumArtContentProvider.servesHost and this calls it.
  */
 class AlbumArtHostAllowlistTest {
 
-    /** Mirrors AlbumArtContentProvider.ALLOWED_HOSTS and its suffix match. */
-    private val allowed = setOf(
-        "media.bauerradio.com",
-        "assets.planetradio.co.uk",
-        "mzstatic.com",
-        "retrofm.se"
-    )
-
-    private fun isAllowed(url: String): Boolean {
-        val host = URI(url).host
-        return host != null && allowed.any { host == it || host.endsWith(".$it") }
-    }
+    private fun isAllowed(url: String): Boolean =
+        AlbumArtContentProvider.servesHost(URI(url).host)
 
     @Test
     fun `the station logo is fetchable`() {

@@ -52,6 +52,17 @@ class AlbumArtContentProvider : ContentProvider() {
         )
         private const val B64 = Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
 
+        /**
+         * Whether [openFile] would fetch this host — the allowlist rule, in one place.
+         *
+         * It has two callers: the fetch itself, and [RetroFmMediaItemConverter]'s inverse
+         * mapping, which must only take back a URL this provider can actually serve. A second
+         * spelling of the suffix match would drift silently, since both copies keep working
+         * while they disagree.
+         */
+        fun servesHost(host: String?): Boolean =
+            host != null && ALLOWED_HOSTS.any { host == it || host.endsWith(".$it") }
+
         /** Maps a remote art URI to a content:// URI this provider serves. Context-free. */
         fun mapUri(remote: Uri): Uri = Uri.Builder()
             .scheme(ContentResolver.SCHEME_CONTENT)
@@ -117,7 +128,7 @@ class AlbumArtContentProvider : ContentProvider() {
         val remote = decode(token) ?: return null
 
         val host = runCatching { Uri.parse(remote).host }.getOrNull()
-        if (host == null || ALLOWED_HOSTS.none { host == it || host.endsWith(".$it") }) {
+        if (!servesHost(host)) {
             Timber.tag("Artwork").w("blocked non-allowlisted art host: %s", host)
             return null
         }
