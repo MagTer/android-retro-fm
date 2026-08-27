@@ -176,8 +176,9 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
     Re-open only if that trade changes; the mechanism is understood, so no investigation is
     needed first.
 - **Ads have been absent since the CDN move, and the ad code is now unexercised.** Zero ad
-  markers across every device in the 14 days to 2026-08-22 (`--grep "adw_ad|Reklam|ad state"`
-  over the field logs). `IcyAdMarker`, `MUTE_ADS` and the ad-state machinery still run but nothing
+  markers across every device in the 14 days to 2026-08-22, and none in the car in the five days
+  to 2026-08-27 either (`--grep "adw_ad|Reklam|ad state"` over the field logs). `IcyAdMarker`,
+  `MUTE_ADS` and the ad-state machinery still run but nothing
   in the field has tested them against Mad Men Media's stream — the format that made them work
   was Bauer's. Expect to redo that implementation when the station starts running ads again, and
   do not read "ad muting works" from the absence of complaints.
@@ -406,11 +407,18 @@ unbounded while iTunes' is bounded. A recommendation to invert the priority (iTu
 station only when iTunes returns nothing) was put to the maintainer on 2026-08-22 and
 **accepted the same day**, knowing it costs the Nik Kershaw case. Shipped in 1.0.60.
 
-**What that means in practice: the page is now barely used.** iTunes produced a pick for 36 of
-the 37 corpus tracks, so the fallback fires on the order of one boundary in thirty — the
-measured case being "Hall & Oates – Maneater", where Apple credits "Daryl Hall & John Oates" and
-nothing matches the credit. A welcome side effect is that `retrofm.se` is no longer fetched at
-every boundary, which retires most of the per-device dependency flagged further down.
+**What that means in practice: the page is now barely used — and in the field, not used at
+all.** iTunes produced a pick for 36 of the 37 corpus tracks, so the fallback was expected on
+the order of one boundary in thirty — the measured case being "Hall & Oates – Maneater", where
+Apple credits "Daryl Hall & John Oates" and nothing matches the credit. The first five days of
+1.0.60 in the car (2026-08-22→08-27, 44 boundaries) went further: **44 lookups, zero `no match`,
+so the page was never consulted once.** `retrofm.se` is therefore no longer fetched at all on a
+normal drive, which retires most of the per-device dependency flagged further down.
+
+The flip side is that the fallback path is now **unexercised in the field**: nothing has proved
+`StationNowPlaying` still works against the live site since the reversal. Do not read "the page
+source is fine" from the absence of failures — there is no traffic to fail. If it matters, prove
+it directly against the site rather than waiting for a log line that may never come.
 
 **Rejected at the same time, and worth knowing why:** a hybrid that used the page only when
 iTunes' own pick was weak (null, or `ownRelease = false`). On the corpus it looked better than
@@ -617,6 +625,14 @@ reasons that are not yours: where two candidates tie on every term, `-index` dec
 reorders between then and now (seen on Queen and Rick Astley, 2026-08-17). A tiebreak resting
 on Apple's ordering is not reproducible — do not chase those as bugs.
 
+It reaches the field too, not only the replay bench: the car looked up
+`Bill Medley & Jennifer Warnes (I've Had) The Time of My Life` twice two days apart and got
+*The Best of Bill Medley* on 2026-08-22 and *Dirty Dancing (Original Motion Picture
+Soundtrack)* on 08-24 — same query, same code, different cover on screen. It was the only
+unstable pick in 44 boundaries, and that time the drift went the right way. Do not treat "the
+cover changed for a song I saw yesterday" as a regression without checking the query is stable
+first.
+
 Two mechanics that make a replay describe the app rather than the harness (learned 2026-08-22):
 
 - **Score with `ArtworkLookup.pick` itself, never a re-implementation.** A Python copy of the
@@ -656,10 +672,21 @@ measurement instead. It paid for itself the same evening — one recovered drive
 successes at a **median of 607 ms** (worst 931 ms) against 3 failures, all of them stalling at
 exactly the 8 s connect timeout. So the 20 s ceiling is not what bites; the connect phase is.
 
-**Only the first lookup of a playback session fails.** All three failures were the first track
-after playback started — the modem is warm for the audio stream but cold for a new host, and
-nothing else pays that cost. Hence `ARTWORK_LOOKUP_ATTEMPTS = 2`. Do not raise it — a third
-attempt would be pressing an API that is plainly unreachable.
+**Only the first lookup of a playback session fails — but most first lookups are fine.** Every
+failure ever logged has been the first track after playback started: the modem is warm for the
+audio stream but cold for a new host, and nothing else pays that cost. The converse is not true
+and a 2026-08-22→08-27 capture measures it: over 44 car boundaries (47 attempts, counting the
+retries), **13 lookups started within 10 s of a `network available` and 3 of those failed; the
+31 warm ones failed 0 times**. So a cold first lookup is a ~1-in-4 risk, not a certainty — do
+not read a successful drive as evidence the cold path is fixed. Hence
+`ARTWORK_LOOKUP_ATTEMPTS = 2`. Do not raise it — a third attempt would be pressing an API that
+is plainly unreachable.
+
+Warm-path latency from the same capture, 41 first-attempt successes: **median 852 ms, worst
+1597 ms**. Exactly one exceeded `ARTWORK_FIRST_APPLY_BUDGET_MS` — by 97 ms — and paid for it
+with the double apply the budget exists to prevent (`apply` → `late artwork applied` → `apply`,
+inside one second). The budget sits in the tail of the distribution, so that will keep happening
+occasionally; it is not a regression.
 
 **But an *immediate* retry is a wasted request, and this note used to claim the opposite.** It
 was added believing the second attempt would land in under a second, since only the first pays
@@ -672,6 +699,13 @@ to a host outside the pool, and both attempts spent themselves inside that same 
 3–4 min track and the display never waits. What used to rescue these songs was the mount's
 re-announcement re-running the lookup minutes later — that is the "artwork appears just as the
 song ends" symptom, not a second chance worth designing around.
+
+**The delay works, confirmed in the field 2026-08-27.** Over 2026-08-22→08-27 on 1.0.60 the car
+logged three first-lookup timeouts — Kokomo, The Logical Song, Cryin' — each breaking at ~8.0 s
+on the connect phase, and **all three succeeded on attempt 2** at a total of ~23.9 s. Against
+the 3-of-3 failures that motivated the delay, that is the measurement that closes it. The cost
+is visible and accepted: the display carried the station logo for ~24 s before the cover
+appeared.
 
 **The mount re-announces a title mid-track.** Confirmed 2026-08-09: the same `StreamTitle`
 arrives again 50–90 s into a song (`apply skipped (dedup)` when the metadata is unchanged).
@@ -761,11 +795,19 @@ songs, shortest 0.98 s (2026-08-15 09:30:24). **The value is now 30 s**, inside 
 band; it removes 13 of those 22 reverts and still catches all 9 real interruptions (≥32 s),
 paying 30 s of stale title instead of 15 s when the interruption is real.
 
-Re-measure the band before touching it again — twice now the distribution has been the whole
-argument, and the second one contradicted the first. The samples are already in the field logs
-as `icy boundary` followed by `apply skipped (dedup)`; the earlier capture is a ~40-line script
-that connects once with `Icy-MetaData: 1`, reads `icy-metaint` bytes, reads the length byte and
+Re-measure the band before touching it again — three times now the distribution has been the
+whole argument, and no two have agreed. The samples are already in the field logs as `icy
+boundary` followed by `apply skipped (dedup)`; the earlier capture is a ~40-line script that
+connects once with `Icy-MetaData: 1`, reads `icy-metaint` bytes, reads the length byte and
 prints non-empty blocks with a timestamp. One listener connection, no polling.
+
+**Third capture, 2026-08-22→08-27 on 1.0.60 (car, 25 usable hand-overs):** 1, 5, 5, 7, 7, 7, 7,
+8, 8, 9, 9, 13, 13, 16 — then **nothing until 32** — then 32, 40, 47, 49, 52, 53, 83, 95, 111,
+220, 277. The empty band reads 16 s → 32 s here, i.e. 30 s now sits at its very edge rather than
+in its middle. **Not a reason to move the value:** n=25 against the 109 that set it, and the
+1.0.54 week put 22 samples in the 15–25 s range this one simply did not sample. Six of the gaps
+(32–53 s) are real track changes where the logo still blinked for 2–23 s, which is the standing
+cost of 30 s and was already known. Re-measure on a larger sample before changing anything.
 
 **The marker is not always the end of the track — partly fixed 2026-08-27, and the rest is
 open.** The mount re-announces a title 1–5 times, usually 150–290 s in, but sometimes at +7 s,
