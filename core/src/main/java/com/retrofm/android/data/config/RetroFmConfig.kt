@@ -446,6 +446,40 @@ object RetroFmConfig {
     const val TRACK_HANDOVER_GRACE_MS = 30_000L
 
     /**
+     * How long the current title must have held the display — while playing, on one unbroken
+     * stream — before a repeat of it is allowed to count as an end-of-track marker at all.
+     *
+     * TRACK_HANDOVER_GRACE_MS above answers "how long after the marker", and takes the marker
+     * itself for granted. It is not: the mount announces the current title **on connect** as
+     * well as at changes, so a stream that has just opened or reopened repeats what is already
+     * on screen, and that is not a song ending. Without this floor those repeats armed the
+     * timer, and the display went song → station logo → *the same song again*.
+     *
+     * **Measured on the car over 2026-08-22 → 08-27 (1.0.60, 5 sessions, 44 boundaries):** 5 of
+     * 11 hand-over reverts were false that way — four of them on 08-27 alone — with the logo
+     * standing for 26 s, 29 s, 67 s, 152 s and 181 s mid-song. Age of the repeat that armed
+     * each false revert: **3, 7, 13, 21 s** (and two at 98 and 124 s, see below). Age of every
+     * repeat that armed a *correct* revert in the same capture: **59, 137, 186, 192, 196,
+     * 215, 262 s**. 25 s sits in the empty band 27 s → 59 s and is below the earliest *last*
+     * marker seen in the 1.0.54 week (28 s), so it cannot suppress a marker that week showed
+     * to be a track's last.
+     *
+     * What it buys, replayed against that capture: 3 confirmed false reverts removed (Heart Of
+     * Gold, Circle Of Life, Love Is All Around), 1 near-certain (Crazy Crazy Nights, blanked
+     * 43 s into a four-minute song), **0 correct reverts lost**.
+     *
+     * What it does **not** buy: the two repeats at +98 s ("Joe Le Taxi") and +124 s ("You Get
+     * What You Give") are genuine mid-song re-announcements, and no age threshold separates
+     * them from the real markers at +59 s and up. Those two false reverts remain — do not
+     * raise this value to chase them, it would start eating correct reverts instead.
+     *
+     * The floor is enforced by [com.retrofm.android.playback.EndOfTrackMarker], whose clock
+     * restarts on a title change *and* on a stream re-open; that second reset is the half that
+     * covers the reconnect case, where the title on screen is old but the connection is not.
+     */
+    const val TRACK_HANDOVER_MIN_AGE_MS = 25_000L
+
+    /**
      * How long one title may stay on screen *while playing* before it is treated as a frozen
      * injector and the display reverts to station branding.
      *

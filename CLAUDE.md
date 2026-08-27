@@ -767,13 +767,38 @@ as `icy boundary` followed by `apply skipped (dedup)`; the earlier capture is a 
 that connects once with `Icy-MetaData: 1`, reads `icy-metaint` bytes, reads the length byte and
 prints non-empty blocks with a timestamp. One listener connection, no polling.
 
-**Known and unfixed: the marker is not always the end of the track.** The mount re-announces a
-title 1–5 times, usually 150–290 s in, but sometimes at +7 s. Six times in that week the
+**The marker is not always the end of the track — partly fixed 2026-08-27, and the rest is
+open.** The mount re-announces a title 1–5 times, usually 150–290 s in, but sometimes at +7 s,
+and it announces the current title **on connect** as well. Six times in the 1.0.54 week the
 display went song → logo → *the same song again* (Imagine, 2026-08-15 09:03: announced at
-+0, +7, +30 and +71 s, blanked at +22 s, restored at +30 s). `All Out Of Love` was announced
-four times in nine seconds. A guard that only arms the timer when the marker arrives ≥60 s into
-the track would cover every observed case — the earliest *last* marker in the week is 28 s —
-but it is not implemented.
++0, +7, +30 and +71 s, blanked at +22 s, restored at +30 s); `All Out Of Love` was announced
+four times in nine seconds. **On 1.0.60 it got worse, not better: 5 of 11 hand-over reverts were
+false** over 2026-08-22→08-27 in the car — four of them on 08-27 alone — with the logo standing
+26, 29, 67, 152 and 181 s over a song that was still playing.
+
+`RetroFmConfig.TRACK_HANDOVER_MIN_AGE_MS` (25 s) is the floor that now closes two of the three
+shapes, enforced by `EndOfTrackMarker`. The ages tell them apart: the repeats behind the false
+reverts arrived **3, 7, 13, 21 s** into the title, the ones behind correct reverts at **59, 137,
+186, 192, 196, 215, 262 s**. Replayed against that capture the floor removes 3 confirmed false
+reverts and 1 near-certain, and loses **no** correct revert.
+
+- **The clock restarts on a stream re-open as well as on a title change, and that second reset
+  is half the fix.** An earlier note here proposed "only arm when the marker arrives ≥60 s into
+  the track" — that reads the wrong clock. "Love Is All Around" (2026-08-27 15:23) had been
+  playing 80 s when the modem dropped; the stream reopened and the mount re-announced what was
+  already on screen. The *title* was old, the *connection* was not. What the gate measures is
+  therefore playing time on one unbroken stream.
+- **The residual is the genuine mid-song re-announcement and no timing rule reaches it.** "Joe
+  Le Taxi" repeated at +98 s and "You Get What You Give" at +124 s, neither the end of the song
+  — while real markers landed at +59, +123, +137, +186 s in the same capture. The distributions
+  overlap outright. Raising the floor to catch them would start eating correct reverts; leave it
+  and expect ~2 blinks per 40 boundaries.
+- The suppressed case logs `title repeat N s in — too early to be an end-of-track marker`, so
+  the next capture can count what the gate is actually rejecting.
+- **`EndOfTrackMarker.titleAgeMs()` banks the clock before answering, and must keep doing so.**
+  The playback heartbeat ticks every 30 s but a marker arrives whenever the mount sends it;
+  reading the raw accumulator would turn the 25 s floor into an unpredictable 25–55 s one. The
+  freeze defence has no such problem because it is checked inside the heartbeat.
 
 ### retrofm.se: dead ends, so nobody re-runs them (probed 2026-08-08, settled 2026-08-20)
 

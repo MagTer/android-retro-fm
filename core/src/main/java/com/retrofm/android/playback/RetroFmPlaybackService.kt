@@ -71,6 +71,13 @@ class RetroFmPlaybackService : MediaLibraryService() {
      * [maybeHandleFrozenMetadata] and [TrackPlayingClock] for why that distinction is the point.
      */
     private val trackClock = TrackPlayingClock()
+
+    /**
+     * Decides whether a repeated title is the song ending or the mount's connect announcement.
+     * Driven by the same heartbeat as [trackClock], but reset on a stream re-open as well as on
+     * a title change — see [EndOfTrackMarker] for the field cases.
+     */
+    private val endOfTrackMarker = EndOfTrackMarker(RetroFmConfig.TRACK_HANDOVER_MIN_AGE_MS)
     private var adUntilElapsedMs: Long? = null
     private var adUnmuteJob: Job? = null
     private var adCountdownJob: Job? = null
@@ -203,6 +210,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
         // restart the freeze clock (see maybeHandleFrozenMetadata).
         if (track.eventId != currentTrack?.eventId) {
             trackClock.restart()
+            endOfTrackMarker.titleChanged()
         }
 
         // Live browse tile: the station's browse representation mirrors the current track,
@@ -435,10 +443,12 @@ class RetroFmPlaybackService : MediaLibraryService() {
         // Start the track clock from now, not from whenever it last stopped: the gap in
         // between is exactly the stalled time that must not count. See maybeHandleFrozenMetadata.
         trackClock.start()
+        endOfTrackMarker.playbackStarted()
         playbackHeartbeatJob = serviceScope.launch {
             while (isActive) {
                 lastAliveWallMs = System.currentTimeMillis()
                 trackClock.tick()
+                endOfTrackMarker.tick()
                 maybeHandleFrozenMetadata()
                 delay(RetroFmConfig.PLAYBACK_HEARTBEAT_MS)
             }
@@ -506,6 +516,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
         // Bank what was played up to the stall, then stop the clock: everything from here until
         // audio returns is stalled time and must not count towards the freeze budget.
         trackClock.stop()
+        endOfTrackMarker.playbackStopped()
         lastAliveWallMs = System.currentTimeMillis()
         // Nothing is on air, so an end-of-track marker from before the pause must not fire a
         // branding swap into a stopped session — the idle path owns the display from here.
@@ -513,6 +524,20 @@ class RetroFmPlaybackService : MediaLibraryService() {
     }
 
     private inner class PlaybackStateListener : Player.Listener {
+        /**
+         * BUFFERING is the service's only observable for "the mount is about to be (re)opened":
+         * every prepare() reaches it, whether it came from the play press, the reconnect backoff
+         * or a validated-internet retry (see PlayerManager). A plain mid-song rebuffer that
+         * keeps its socket passes through here too and resets the marker's clock needlessly —
+         * that costs at most one delayed branding revert, which is the safe direction, and the
+         * alternative is threading reopen state out of PlayerManager for no measured gain.
+         */
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_BUFFERING) {
+                endOfTrackMarker.streamReopened()
+            }
+        }
+
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             // Fires at the play press itself, seconds before audio starts — the earliest
             // moment to swap a previous drive's song off the screen.
@@ -678,11 +703,23 @@ class RetroFmPlaybackService : MediaLibraryService() {
             return
         }
         if (track.eventId == currentTrack?.eventId) {
-            // The mount repeats the current title once, a few seconds before the next one —
-            // effectively an end-of-track marker (see RetroFmConfig.TRACK_HANDOVER_GRACE_MS).
-            // Arm the handover timer and let the rest of the boundary handling run: the repeat
-            // is also the second chance for an artwork lookup that failed the first time.
-            armHandoverTimeout()
+            // The mount repeats the current title a few seconds before the next one — an
+            // end-of-track marker in all but name (see RetroFmConfig.TRACK_HANDOVER_GRACE_MS).
+            // But it also announces the current title on *connect*, and repeats a playing title
+            // mid-song, so a repeat that arrives while the title is still young on this
+            // connection means nothing: it blanked songs that had barely started, and songs the
+            // modem had just reconnected to. EndOfTrackMarker is that floor.
+            //
+            // Either way the rest of the boundary handling runs: the repeat is also the second
+            // chance for an artwork lookup that failed the first time.
+            if (endOfTrackMarker.isEndOfTrack()) {
+                armHandoverTimeout()
+            } else {
+                Timber.tag("NowPlaying").d(
+                    "title repeat %d s in — too early to be an end-of-track marker",
+                    endOfTrackMarker.titleAgeMs() / 1000
+                )
+            }
         } else {
             handoverJob?.cancel()
         }
