@@ -35,6 +35,15 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
     private var wasPlayingBeforeError = false
 
     /**
+     * Tells a hand-over this app asked for (the stall watchdog rescuing a dead receiver, which
+     * must resume audibly) from one it did not (the session dropping, which must not). The rule
+     * and the claim's lifetime live in the class so they can be tested; see
+     * [RetroFmConfig.CAST_RESUME_LOCALLY_ON_SESSION_LOSS] for why the default is to stay quiet.
+     */
+    private val handOverPolicy =
+        CastHandOverPolicy(RetroFmConfig.CAST_RESUME_LOCALLY_ON_SESSION_LOSS)
+
+    /**
      * Armed while the Cast receiver is stalled; see [RetroFmConfig.CAST_STALL_RECOVER_MS].
      *
      * Deliberately *not* restarted by state churn: the 2026-08-22 failure flapped READY/IDLE
@@ -120,6 +129,22 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
                             from.playbackState, from.playWhenReady
                         )
                         CastPlayer.TransferCallback.DEFAULT.transferState(from, to)
+                        // DEFAULT carries playWhenReady across, which is right coming FROM the
+                        // phone and wrong coming back TO it: the receiver streams on its own, so
+                        // a phone that walks out of Wi-Fi range loses only the remote control
+                        // while the speakers keep playing. See
+                        // RetroFmConfig.CAST_RESUME_LOCALLY_ON_SESSION_LOSS for the field case
+                        // and for why stopping the cast by hand pauses too.
+                        val silence = handOverPolicy.silenceOnHandOver(
+                            fromRemote = describePlayer(from) == "REMOTE",
+                            toRemote = describePlayer(to) == "REMOTE"
+                        )
+                        if (silence && to.playWhenReady) {
+                            Timber.tag(TAG).i(
+                                "cast session ended without us asking — staying paused on this device"
+                            )
+                            to.playWhenReady = false
+                        }
                     }
                     .setRemotePlayer(
                         RemoteCastPlayer.Builder(context)
@@ -176,16 +201,19 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
             }
             when {
                 playbackState == Player.STATE_IDLE -> {
+                    noteStreamAction("prepare", "play pressed from IDLE")
                     super.setPlayWhenReady(true)
                     super.prepare()
                 }
                 playbackState == Player.STATE_ENDED -> {
+                    noteStreamAction("seek+prepare", "play pressed from ENDED")
                     super.seekToDefaultPosition()
                     super.setPlayWhenReady(true)
                     super.prepare()
                 }
                 !this.playWhenReady -> {
                     // Resume from pause: back to the live edge, never the stale buffer.
+                    noteStreamAction("seek", "resume from pause — to the live edge")
                     super.seekToDefaultPosition()
                     super.setPlayWhenReady(true)
                 }
@@ -206,18 +234,21 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
         override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
             val validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
             val internet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            Timber.tag("Network").d("capabilities: internet=%b validated=%b", internet, validated)
+            Timber.tag("Network").d(
+                "capabilities: %s internet=%b validated=%b",
+                describeCapabilities(caps), internet, validated
+            )
             if (validated) {
                 scope.launch { retryNowIfRecovering() }
             }
         }
 
         override fun onAvailable(network: Network) {
-            Timber.tag("Network").d("network available")
+            Timber.tag("Network").d("network available (%s)", describeTransports(network))
         }
 
         override fun onLost(network: Network) {
-            Timber.tag("Network").w("network lost")
+            Timber.tag("Network").w("network lost (%s)", describeTransports(network))
         }
     }
 
@@ -230,13 +261,39 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
         logNetworkSnapshot()
     }
 
+    /**
+     * Which link this is — the field the 2026-08-29 investigation needed and did not have.
+     *
+     * The symptom to explain was "I leave Wi-Fi and playback goes strange", and the record said
+     * only `network lost` / `network available`. Because the callback is registered for the
+     * *default* network, a Wi-Fi → cellular handover appears as a bare `network available` for a
+     * different link with no `lost` beside it (2026-08-29 18:53:02), which is unreadable without
+     * the transport.
+     *
+     * Reports `unknown` rather than guessing when the capabilities are gone — which is the norm
+     * in [ConnectivityManager.NetworkCallback.onLost], since the network has already been torn
+     * down by the time it is called. A confident wrong transport would be worse than the gap.
+     */
+    private fun describeTransports(network: Network): String =
+        connectivityManager.getNetworkCapabilities(network)
+            ?.let { describeCapabilities(it) } ?: "unknown"
+
+    private fun describeCapabilities(caps: NetworkCapabilities): String = buildList {
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) add("wifi")
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) add("cellular")
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) add("ethernet")
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) add("vpn")
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH)) add("bluetooth")
+    }.joinToString("+").ifEmpty { "other" }
+
     /** One-shot snapshot of connectivity at process start — tests whether the car has real
      *  internet the moment it launches us (the suspected trigger for launch-time verification). */
     private fun logNetworkSnapshot() {
         val net = connectivityManager.activeNetwork
         val caps = net?.let { connectivityManager.getNetworkCapabilities(it) }
         Timber.tag("Network").i(
-            "startup snapshot: activeNetwork=%b internet=%b validated=%b",
+            "startup snapshot: %s activeNetwork=%b internet=%b validated=%b",
+            caps?.let { describeCapabilities(it) } ?: "unknown",
             net != null,
             caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true,
             caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
@@ -270,6 +327,7 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
         if (!player.playWhenReady) return
         reconnectJob?.cancel()
         reconnectAttempts = 0
+        noteStreamAction("prepare", "validated internet returned — retrying now")
         player.prepare()
         player.play()
     }
@@ -294,9 +352,19 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
             if (!player.playWhenReady) return@launch
             // prepare() reopens the live stream at the live edge, so recovery is never stale.
             // On the cast route this re-loads the stream on the receiver — acceptable.
+            noteStreamAction("prepare", "reconnect backoff attempt $reconnectAttempts")
             player.prepare()
             player.play()
         }
+    }
+
+    /**
+     * Records who asked for a seek or a re-open, so `discontinuity SEEK` in the log has a named
+     * caller instead of an argument about it. Every deliberate call site goes through this; a
+     * discontinuity with no line beside it was the player's own doing.
+     */
+    private fun noteStreamAction(verb: String, cause: String) {
+        Timber.tag(TAG).d("stream %s — %s", verb, cause)
     }
 
     private fun describePlayer(p: Player): String =
@@ -343,6 +411,7 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
                         // Reuse the error path's notion of "playback was wanted", so a later
                         // failure lands in the same reconnect machinery, not a parallel one.
                         wasPlayingBeforeError = true
+                        noteStreamAction("prepare", "cast stall watchdog re-load")
                         player.prepare()
                         player.play()
                     }
@@ -368,9 +437,17 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
      * failed class resolution from touching anything else.
      */
     private fun handBackToLocal() {
+        // Claim this hand-over before ending the session: the transfer callback fires from
+        // inside endCurrentSession, so setting the flag afterwards would be too late and the
+        // watchdog's rescue would arrive muted — the one case where local audio is the point.
+        handOverPolicy.handBackRequested()
         try {
             CastContext.getSharedInstance(appContext).sessionManager.endCurrentSession(true)
         } catch (e: Exception) {
+            // No transfer callback will fire, so the claim above must not survive: left set, it
+            // would exempt the *next* hand-over — which is the unrequested one this exists to
+            // silence.
+            handOverPolicy.handBackAbandoned()
             Timber.tag(TAG).w("could not end the cast session: %s", e.javaClass.simpleName)
         }
     }
@@ -406,6 +483,40 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
             updateCastStallWatchdog()
         }
 
+        /**
+         * Why the playback position jumped — the field this log could not answer on 2026-08-29.
+         *
+         * After a Cast session dropped, the phone logged 30 `BUFFERING -> READY` round trips,
+         * 29 of them completing in **≤0.1 s** and eighteen of them exactly 2 s apart. A 10 s
+         * `BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS` cannot be satisfied in 100 ms from a live
+         * realtime source, so those were not rebuffers — but nothing recorded whether the
+         * buffer was thrown away by a seek or the loader was quietly retrying underneath
+         * ([DefaultLoadErrorHandlingPolicy] swallows six attempts before raising anything).
+         * The two have completely different fixes and the record could not tell them apart.
+         *
+         * `SEEK` here means someone called for it and [noteStreamAction]'s lines name who;
+         * `INTERNAL` means the player did it to itself, which is the loader's signature.
+         */
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int
+        ) {
+            val name = when (reason) {
+                Player.DISCONTINUITY_REASON_AUTO_TRANSITION -> "AUTO_TRANSITION"
+                Player.DISCONTINUITY_REASON_SEEK -> "SEEK"
+                Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT -> "SEEK_ADJUSTMENT"
+                Player.DISCONTINUITY_REASON_SKIP -> "SKIP"
+                Player.DISCONTINUITY_REASON_REMOVE -> "REMOVE"
+                Player.DISCONTINUITY_REASON_INTERNAL -> "INTERNAL"
+                else -> "?$reason"
+            }
+            Timber.tag(TAG).d(
+                "discontinuity %s %d -> %d s", name,
+                oldPosition.positionMs / 1000, newPosition.positionMs / 1000
+            )
+        }
+
         override fun onPlayerError(error: PlaybackException) {
             Timber.tag(TAG).w(
                 "player error %s (reconnect attempt %d, playWhenReady=%b)",
@@ -413,6 +524,7 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
             )
             wasPlayingBeforeError = player.playWhenReady
             if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+                noteStreamAction("seek+prepare", "fell behind the live window")
                 player.seekToDefaultPosition()
                 player.prepare()
                 return

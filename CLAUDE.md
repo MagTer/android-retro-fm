@@ -251,8 +251,29 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
     from a speaker. Worth adding the next time this area is touched.
   - Media3's `CastPlayer` has **no veto on the local→remote transfer**: `setTransferCallback`
     hands you `transferState(from, to)` *while* the switch happens. So "don't switch back to a
-    receiver that isn't ready" is not implementable; the callback is wired for logging only, and
-    the hand-back above is what actually gets the audio back.
+    receiver that isn't ready" is not implementable, and the hand-back above is what actually
+    gets the audio back. It is **not** logging-only, which this note used to say: it cannot
+    refuse a transfer but it can decide what state crosses, which is where the rule below lives.
+  - **Losing the Cast session does not start the audio on the phone** (`CAST_RESUME_LOCALLY_ON
+    _SESSION_LOSS`, false since 1.0.62). The receiver fetches the stream itself, so when the
+    *phone* walks out of Wi-Fi range only the control link dies — the speakers carry on.
+    `TransferCallback.DEFAULT` copies `playWhenReady` across regardless, so the phone joined in
+    on top of them: audio in a pocket, over music already playing in the room, from a device the
+    user had deliberately handed playback away from (2026-08-29 18:35:55, `cast transfer:
+    REMOTE -> LOCAL (state=3 playWhenReady=true)` one second after `network lost`). Starting a
+    cast is a statement about *where* the sound belongs and losing Wi-Fi does not retract it.
+    - **The watchdog's hand-back is exempt and must stay exempt.** `CAST_STALL_HANDBACK_MS`
+      exists to get audio back off a dead receiver, so that path claims the hand-over before
+      ending the session and plays. `CastHandOverPolicy` owns the claim; the rule worth pinning
+      is its **lifetime**, not the boolean — a claim that leaks into the next hand-over
+      un-silences exactly the case this exists for, and one consumed early mutes the rescue.
+      Both directions are in `CastHandOverPolicyTest`, including the abandoned claim when
+      `endCurrentSession` throws.
+    - **Accepted consequence:** stopping the cast from the system UI now pauses too, where it
+      used to continue on the phone. The two are not distinguishable without registering a Cast
+      `SessionManagerListener` and trusting its suspend reason — more surface for a guess, and
+      the failure modes are not symmetric: unwanted silence costs one tap, unwanted audio costs
+      whatever it interrupts. Flip the constant to restore Media3's default for both.
 
 ## Now-playing metadata: Bauer is dead, the station moved
 
@@ -921,6 +942,25 @@ redeploy** of the log infra, so re-enable DEBUG before an investigation. The exa
   (home-server repo), and a client that halves a 413'd batch instead of repeating it
   (logsink-clients). **Diagnostic order that worked: VictoriaLogs → shim access log → proxy
   log.** The shim log was decisive precisely because it showed *no* POSTs at all.
+- **A state change with no recorded cause is not diagnosable, and that cost a whole
+  investigation (2026-08-29).** After a Cast session dropped, the phone logged 30
+  `BUFFERING -> READY` round trips, **29 of them completing in ≤0.1 s** and eighteen exactly 2 s
+  apart. That rules out a rebuffer — `BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS` is 10 s and no
+  realtime stream delivers ten seconds of audio in a hundred milliseconds — but nothing recorded
+  whether the buffer was discarded by a **seek** or the loader was quietly retrying underneath
+  (`DefaultLoadErrorHandlingPolicy(6)` swallows six attempts before raising anything). Different
+  causes, different fixes, and the record could not separate them. **The mechanism is still
+  unknown; do not repeat either guess as a finding.** Three lines were added in 1.0.62 so the
+  next occurrence settles it:
+  - `discontinuity <REASON> N -> N s` from `onPositionDiscontinuity`. `SEEK` means a caller asked;
+    `INTERNAL` is the player acting on itself, which is the loader's signature.
+  - `stream <verb> — <cause>` at every deliberate `seek`/`prepare` call site, so a `SEEK` always
+    has a named caller instead of an argument about which one it was.
+  - The transport on every Network line (`network available (wifi)`), because the callback is
+    registered for the *default* network: a Wi-Fi → cellular handover appears as a bare
+    `network available` with no `lost` beside it (2026-08-29 18:53:02) and was unreadable.
+    Reports `unknown` when the capabilities are already gone — normal in `onLost` — rather than
+    guessing a transport.
 - **Log lines cost wire bytes, so keep them short.** The artwork `content://` URIs are the
   remote URL base64'd into the path — ~300 chars, twice per bitmap load. They alone filled the
   batches that the 4 KB cap then rejected. `AlbumArtContentProvider.describe` renders them as

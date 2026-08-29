@@ -377,6 +377,36 @@ object RetroFmConfig {
     const val CAST_HANDBACK_ENABLED = true
 
     /**
+     * Whether losing the Cast session should start the audio playing on the phone.
+     *
+     * **False, and the reasoning is about what the receiver is doing, not about the phone.**
+     * The receiver fetches the stream itself — it is a separate device with its own internet
+     * connection — so when the *phone* walks out of Wi-Fi range only the control link dies.
+     * The speakers carry on. Media3's `TransferCallback.DEFAULT` copies `playWhenReady` across
+     * to the local player, so the phone joined in: audio in a pocket, over music already
+     * playing in the room, from a device the user had deliberately handed playback away from.
+     * Field case 2026-08-29 18:35:55, `cast transfer: REMOTE -> LOCAL (state=3
+     * playWhenReady=true)` one second after `network lost`.
+     *
+     * Starting a Cast session is a statement about *where* the sound should come from, and
+     * nothing about losing Wi-Fi retracts it. So an unrequested hand-over lands paused; one tap
+     * resumes it on the phone if that is genuinely wanted.
+     *
+     * **Deliberate hand-backs are exempt and must stay that way.** When the stall watchdog ends
+     * the session itself (`CAST_STALL_HANDBACK_MS`) the whole point is that the receiver has
+     * gone silent and the audio must come back — that path sets its own flag and plays. Only
+     * hand-overs this app did not ask for are silenced.
+     *
+     * **Known consequence, accepted:** stopping the cast from the system UI also arrives as an
+     * unrequested hand-over, so that now pauses too where it used to continue on the phone. The
+     * two are not distinguishable without registering a Cast `SessionManagerListener` and
+     * reading its suspend reason — more surface for a guess, when the failure modes are not
+     * symmetric: unwanted silence costs one tap, unwanted audio costs whatever it interrupts.
+     * Flip this to `true` to restore Media3's default behaviour for both.
+     */
+    const val CAST_RESUME_LOCALLY_ON_SESSION_LOSS = false
+
+    /**
      * How often the Cast stall watchdog re-reads the player while a stall is running.
      *
      * A stalled receiver can stay silent without emitting another event, so the escalation
