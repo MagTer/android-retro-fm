@@ -8,7 +8,8 @@ package com.retrofm.android.playback
  * `StreamTitle='';StreamUrl='';adw_ad='true';durationMilliseconds='30024';adId='232764';insertionType='preroll';`
  *
  * The station moved to Mad Men Media's Icecast on 2026-08-08, which was only observed sending a
- * bare `StreamTitle='Title - Artist';` — no StreamUrl, no markers. This parser is kept because it
+ * bare `StreamTitle='Title - Artist';` — no StreamUrl, no markers — and then to Revma (RCS) on
+ * 2026-09-14, whose ad insertion is unobserved as of 2026-09-16. This parser is kept because it
  * costs nothing and the new provider may well splice the same way, but if ads turn out to be
  * unmarked there it simply never matches and RetroFmConfig.MUTE_ADS goes quiet. Nothing else
  * reads the old StreamUrl any more: track identity now comes from the StreamTitle text itself

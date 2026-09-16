@@ -296,7 +296,23 @@ The web players work because they never used Bauer: `retrofm.se` runs Caster (Bl
 `radio-sveriges.se` is myTuner with its own HMAC-signed API — signed for their app, **not ours
 to call**.
 
-### The station moved to a new CDN — that is the answer (found 2026-08-08)
+### The station moved to a new CDN — that is the answer (found 2026-08-08, superseded 2026-09-14)
+
+**2026-09-14 the station moved again, to Revma (RCS).** What `retrofm.se` itself plays, read live
+from the page's player in headless Chromium 2026-09-16:
+
+```
+https://stream.rcs.revma.com/25knctp5vepwv     ~128 kbps AAC (audio/aac), icy-metaint 16000
+```
+
+The URL 302-redirects to an edge node with a short-lived token (`rj-ttl=5`); ExoPlayer follows
+it. ICY metadata is intact — connect-time `StreamTitle` matched the site's now-playing page on
+verification day. The Mad Men Icecast below was retired the same day: `/retro` went 404 and every
+mount except Relax FM was renamed `<mount>_old` (~20:00 UTC). `/retro_old` still carried the
+programme in sync with the site two days later, but the name says it can vanish any day — do not
+build on it. Revma's ad insertion is unobserved as of 2026-09-16; `MUTE_ADS` may be a no-op there.
+
+The rest of this section is kept as the record of the 2026-08-08 move off Bauer.
 
 **We were listening to the wrong server.** `live-bauerse-fm.sharp-stream.com/retrofm_mp3` is a
 legacy Bauer relay. The station's real stream — the one `retrofm.se` itself plays — is a plain

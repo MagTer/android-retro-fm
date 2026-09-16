@@ -23,16 +23,21 @@ En dedikerad Android-app för att lyssna på **Retro FM** utan att gå via TuneI
 
 ### 1. Ljudström
 
-**Aktuell källa (sedan 2026-08-08):** stationens egen Icecast hos Mad Men Media — samma ström som
-`retrofm.se` själv spelar.
+**Aktuell källa (sedan 2026-09-14):** Revma (RCS) — samma ström som `retrofm.se` själv spelar,
+avläst ur sidans spelare i headless Chromium 2026-09-16.
 
 | Format | URL | Bitrate | Innehållstyp |
 |--------|-----|---------|--------------|
-| AAC+ | `https://stream.madmenmedia.se/retro` | 96 kbps | `audio/aacp` |
+| AAC | `https://stream.rcs.revma.com/25knctp5vepwv` | ~128 kbps | `audio/aac` |
 
-Det är enda mounten för Retro FM; systerstationerna på samma server har en `_high`-variant på
-192 kbps, men `retro_high` ger 404. Mounten bär **levande ICY-metadata** (`icy-metaint 16000`,
-`StreamTitle='Title - Artist'`) och annonserar aktuell låt redan vid anslutning.
+URL:en 302:ar till en edge-nod med kortlivad token (`rj-ttl=5`). Mounten bär **levande
+ICY-metadata** (`icy-metaint 16000`, `StreamTitle='Title - Artist'`) och annonserar aktuell
+låt redan vid anslutning.
+
+**Tidigare källa (Mad Men Media, utfasad):** `https://stream.madmenmedia.se/retro` (96 kbps AAC+)
+var stationens egen Icecast 2026-08-08 → 2026-09-14, då mounten försvann (alla deras mountar
+utom Relax FM döptes om till `<mount>_old`; `/retro_old` bar fortfarande programmet 2026-09-16
+men kan försvinna när som helst). Gå inte tillbaka dit.
 
 **Tidigare källa (Bauer, utfasad):** `live-bauerse-fm.sharp-stream.com/retrofm_mp3` (192 kbps MP3)
 och `…/retrofm_aacp` (96 kbps AAC+). De svarar fortfarande men är kvarglömda reläer — MP3-mountens

@@ -7,20 +7,23 @@ object RetroFmConfig {
     const val BRAND_COLOR_HEX = "#000F2B"
 
     /**
-     * The station's own Icecast (Mad Men Media), which is what `retrofm.se` itself plays. It
-     * replaced `live-bauerse-fm.sharp-stream.com/retrofm_mp3` on 2026-08-08: Retro FM left
-     * Bauer/RadioPlay, and that mount is a legacy relay whose ICY injector froze on 2026-07-31.
+     * The station's current stream, read live from `retrofm.se`'s own player (headless Chromium,
+     * 2026-09-16): the station moved from Mad Men Media's Icecast to **Revma (RCS)**. The old
+     * mount `stream.madmenmedia.se/retro` went 404 when every Mad Men mount except Relax FM was
+     * renamed `<mount>_old` on 2026-09-14 ~20:00 UTC; `/retro_old` still carried the programme
+     * two days later, but the `_old` name says it can vanish any day. See CLAUDE.md, "The station
+     * moved to a new CDN".
      *
-     * Everything now-playing rides this stream: the mount sends `StreamTitle='Title - Artist'`
-     * inline (`icy-metaint 16000`), live and at real track boundaries, and announces the current
-     * track immediately on connect — so there is no schedule API to poll and nothing to resync
-     * after a gap. See CLAUDE.md, "The station moved to a new CDN".
+     * The URL 302-redirects to an edge node with a short-lived token (`rj-ttl=5`); ExoPlayer's
+     * DefaultHttpDataSource follows this. Serves `audio/aac` (raw ADTS), measured ~137 kbps over
+     * a 10 s sample — likely a 128 kbps mount. No `icy-br` header is sent.
      *
-     * 96 kbps AAC+ is the only mount for this station: every sibling station here has a 192 kbps
-     * `<mount>_high`, but `retro_high` is 404. Re-check occasionally and prefer it if it appears.
+     * ICY metadata is intact: `icy-metaint 16000`, and the connect-time `StreamTitle` matched
+     * retrofm.se's now-playing page on verification day (`icy-name` is now "Retro FM Sverige
+     * Online"). Everything now-playing still rides the stream; no schedule API to poll.
      */
     const val STREAM_URL =
-        "https://stream.madmenmedia.se/retro"
+        "https://stream.rcs.revma.com/25knctp5vepwv"
 
     // The station's lock-screen asset: same artwork as the "logo" rendition but 1200x1200.
     // The original logo URL (…/v1588755887/…/ujznetkonskklgdql1yd.png) serves only 47x40 and
@@ -223,10 +226,11 @@ object RetroFmConfig {
      * private friends-and-family distribution (2026-07-22); flip to false if the app is ever
      * distributed more widely, since this suppresses the station's own monetization.
      *
-     * UNVERIFIED on the Mad Men Media mount (2026-08-08 switch): the AdsWizz `adw_ad` markers
-     * this depends on came from Bauer's injector, and the new mount was only observed sending a
-     * bare `StreamTitle`. If the new provider splices ads without markers, ad muting silently
-     * does nothing and ads become audible — a behaviour change to listen for, not a code bug.
+     * UNVERIFIED on the Revma mount (2026-09-16 switch): the AdsWizz `adw_ad` markers this
+     * depends on came from Bauer's injector, were never observed on Mad Men Media, and Revma's
+     * own ad insertion has not been observed yet at all. If Revma splices ads without markers,
+     * ad muting silently does nothing and ads become audible — a behaviour change to listen
+     * for, not a code bug.
      */
     const val MUTE_ADS = true
 
@@ -296,11 +300,11 @@ object RetroFmConfig {
      * `contentType` announced to the Cast receiver. **Known to be wrong, deliberately left
      * alone until it can be measured — do not "fix" it blind.**
      *
-     * The mount actually serves `audio/aacp` at 96 kbps (read live from its headers
-     * 2026-08-22, `content-type: audio/aacp`, `icy-br: 96`), i.e. raw ADTS HE-AAC. We announce
+     * The mount actually serves `audio/aac` (read live from the Revma mount's headers
+     * 2026-09-16; Mad Men Media served `audio/aacp` at 96 kbps), i.e. raw ADTS. We announce
      * MP3. Locally that is harmless — ExoPlayer sniffs — but the Default Media Receiver picks
      * its pipeline from this field, which makes it a candidate for the slow, flapping start
-     * seen on a real receiver that day (38 s from transfer to stable audio).
+     * seen on a real receiver on the old mount (38 s from transfer to stable audio, 2026-08-22).
      *
      * What stops a one-line correction is that none of the three candidates is safe on the
      * documentation alone:
@@ -548,9 +552,10 @@ object RetroFmConfig {
      * ExoPlayer only (a Cast receiver keeps its own level); lossless, since ExoPlayer scales
      * in the float pipeline.
      *
-     * STALE as of the 2026-08-08 CDN switch: that measurement was taken on Bauer's 192 kbps MP3
-     * relay, and the app now plays Mad Men Media's 96 kbps AAC+ mount, which is a different
-     * encoder behind different processing. The value is deliberately left unchanged rather than
+     * STALE as of the 2026-08-08 CDN switch, and staler after the 2026-09-14 move to Revma: that
+     * measurement was taken on Bauer's 192 kbps MP3 relay, and the app has since played Mad Men
+     * Media's 96 kbps AAC+ mount and now Revma's ~128 kbps AAC mount — two different encoders
+     * behind different processing. The value is deliberately left unchanged rather than
      * guessed — re-measure (`ffmpeg -i <mount> -af ebur128 -f null -` over ~3 min) and set
      * 10^((−14 − integrated)/20), or calibrate by ear against Spotify on the car as before.
      */

@@ -58,9 +58,10 @@ object MediaItemTree {
         // Mandatory for casting: the Media3 cast item converter throws on a MediaItem with no
         // mimeType. This drives ExoPlayer's local extractor choice and is harmless because it
         // sniffs anyway — but the value is stale: the comment used to say "the MP3 stream",
-        // and since the 2026-08-08 move off the Bauer relay the mount serves raw ADTS HE-AAC
-        // (`audio/aacp`, verified from its headers 2026-08-22). What the *receiver* is told is
-        // a separate decision — see RetroFmConfig.CAST_CONTENT_TYPE.
+        // and since the 2026-08-08 move off the Bauer relay the mount has served raw ADTS
+        // (`audio/aacp` under Mad Men Media, `audio/aac` on Revma since 2026-09-14 — both
+        // verified live from the headers). What the *receiver* is told is a separate
+        // decision — see RetroFmConfig.CAST_CONTENT_TYPE.
         .setMimeType(MimeTypes.AUDIO_MPEG)
         .setMediaMetadata(
             MediaMetadata.Builder()
