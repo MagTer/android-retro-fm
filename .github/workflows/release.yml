@@ -24,6 +24,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The v3 default 'tools platform-tools' breaks: Google removed 'tools' from the SDK
+          # repository, so sdkmanager exits 1 with "Failed to find package 'tools'"
+          # (failed v1.0.63 run, 2026-09-16). Install only what still exists.
+          packages: platform-tools
 
       - name: Ensure API 36 platform
         run: sdkmanager "platforms;android-36"
