@@ -28,11 +28,15 @@ avläst ur sidans spelare i headless Chromium 2026-09-16.
 
 | Format | URL | Bitrate | Innehållstyp |
 |--------|-----|---------|--------------|
-| AAC | `https://stream.rcs.revma.com/25knctp5vepwv` | ~128 kbps | `audio/aac` |
+| AAC-LC, 48 kHz stereo | `https://stream.rcs.revma.com/25knctp5vepwv` | 96 kbps CBR | `audio/aac` |
 
-URL:en 302:ar till en edge-nod med kortlivad token (`rj-ttl=5`). Mounten bär **levande
-ICY-metadata** (`icy-metaint 16000`, `StreamTitle='Title - Artist'`) och annonserar aktuell
-låt redan vid anslutning.
+URL:en 302:ar till en edge-nod med kortlivad token (`rj-ttl=5`); edge-namnet varierar per anrop.
+Mounten bär **levande ICY-metadata** (`icy-metaint 16000`, `StreamTitle='Title - Artist'`) och
+annonserar aktuell låt redan vid anslutning.
+
+Bitraten stod först som "~128 kbps" här. Det var fel: den siffran var wire-byte per väggklocka
+och mätte anslutningsbursten. Mätt 2026-09-17 ur ADTS-headrarna är mounten 96,1 kbps — samma
+bitrate som Mad Men Media, bara en annan codec (AAC+ → AAC-LC).
 
 **Tidigare källa (Mad Men Media, utfasad):** `https://stream.madmenmedia.se/retro` (96 kbps AAC+)
 var stationens egen Icecast 2026-08-08 → 2026-09-14, då mounten försvann (alla deras mountar

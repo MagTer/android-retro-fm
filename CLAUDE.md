@@ -302,12 +302,26 @@ to call**.
 from the page's player in headless Chromium 2026-09-16:
 
 ```
-https://stream.rcs.revma.com/25knctp5vepwv     ~128 kbps AAC (audio/aac), icy-metaint 16000
+https://stream.rcs.revma.com/25knctp5vepwv     96 kbps AAC-LC, 48 kHz stereo (audio/aac), icy-metaint 16000
 ```
 
 The URL 302-redirects to an edge node with a short-lived token (`rj-ttl=5`); ExoPlayer follows
-it. ICY metadata is intact — connect-time `StreamTitle` matched the site's now-playing page on
-verification day. The Mad Men Icecast below was retired the same day: `/retro` went 404 and every
+it, re-sending the request headers on the hop, so ICY survives the redirect. The edge hostname
+varies per request (`n02-eu`, `n13-eu` minutes apart), so opening the stream costs two
+DNS+TCP+TLS handshakes to two hosts — worth remembering against the car's 5 s
+`STREAM_CONNECT_TIMEOUT_MS` on a cold modem. ICY metadata is intact — connect-time `StreamTitle`
+matched the site's now-playing page on verification day.
+
+**The bitrate is 96 kbps, not the ~128 this note first claimed** (measured 2026-09-17 by parsing
+the ADTS frame headers: 590 contiguous frames, AAC-LC, 48 kHz, 96.1 kbps CBR). The first figure
+was wire bytes over wall clock and it measured the **connect burst** — the same capture delivered
+12.6 s of audio in 7.9 s. Measure bytes per *audio* second, never per wall-clock second. So the
+move off Mad Men Media was not a bitrate change at all: 96 kbps both times, HE-AAC (AAC+) →
+AAC-LC. One capture from one edge node, so re-measure rather than trust it if it ever matters:
+`curl -sL --max-time 20 <url> -o s.aac`, then walk the ADTS frames (syncword `0xFFF`, 13-bit
+length at bits 30–42, 1024 samples per frame) and divide total frame bytes by frames×1024/48000.
+
+The Mad Men Icecast below was retired the same day: `/retro` went 404 and every
 mount except Relax FM was renamed `<mount>_old` (~20:00 UTC). `/retro_old` still carried the
 programme in sync with the site two days later, but the name says it can vanish any day — do not
 build on it. Revma's ad insertion is unobserved as of 2026-09-16; `MUTE_ADS` may be a no-op there.

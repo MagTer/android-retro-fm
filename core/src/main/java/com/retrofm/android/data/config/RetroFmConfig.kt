@@ -15,8 +15,19 @@ object RetroFmConfig {
      * moved to a new CDN".
      *
      * The URL 302-redirects to an edge node with a short-lived token (`rj-ttl=5`); ExoPlayer's
-     * DefaultHttpDataSource follows this. Serves `audio/aac` (raw ADTS), measured ~137 kbps over
-     * a 10 s sample — likely a 128 kbps mount. No `icy-br` header is sent.
+     * DefaultHttpDataSource follows this, re-sending the request headers on the hop, so ICY
+     * survives it. Note the edge hostname varies per request (`n02-eu`, `n13-eu` minutes apart),
+     * so opening the stream is two DNS+TCP+TLS handshakes to two hosts, not one.
+     *
+     * Serves `audio/aac`: raw ADTS, **AAC-LC, 48 kHz stereo, 96.1 kbps CBR** — measured
+     * 2026-09-17 by parsing the ADTS frame headers of a 151 KB capture (590 contiguous frames,
+     * frame lengths clustered 247–255 bytes). No `icy-br` header is sent.
+     *
+     * An earlier note here read "~137 kbps, likely a 128 kbps mount". That was wire bytes over
+     * wall clock and it measured the connect burst, not the encoder: the same capture delivered
+     * 12.6 s of audio in 7.9 s. Measure bytes per *audio* second (frame headers), never per
+     * wall-clock second. So this is not a bitrate upgrade over Mad Men Media's 96 kbps — the
+     * rate is the same and only the codec changed, HE-AAC (AAC+) to AAC-LC.
      *
      * ICY metadata is intact: `icy-metaint 16000`, and the connect-time `StreamTitle` matched
      * retrofm.se's now-playing page on verification day (`icy-name` is now "Retro FM Sverige
@@ -300,20 +311,28 @@ object RetroFmConfig {
      * `contentType` announced to the Cast receiver. **Known to be wrong, deliberately left
      * alone until it can be measured — do not "fix" it blind.**
      *
-     * The mount actually serves `audio/aac` (read live from the Revma mount's headers
-     * 2026-09-16; Mad Men Media served `audio/aacp` at 96 kbps), i.e. raw ADTS. We announce
-     * MP3. Locally that is harmless — ExoPlayer sniffs — but the Default Media Receiver picks
-     * its pipeline from this field, which makes it a candidate for the slow, flapping start
-     * seen on a real receiver on the old mount (38 s from transfer to stable audio, 2026-08-22).
+     * The mount actually serves raw ADTS **AAC-LC** as `audio/aac` (headers read live
+     * 2026-09-16, codec measured from the ADTS frames 2026-09-17 — see [STREAM_URL]). We
+     * announce MP3. Locally that is harmless — ExoPlayer sniffs — but the Default Media
+     * Receiver picks its pipeline from this field, which makes it a candidate for the slow,
+     * flapping start seen on a real receiver on the old mount (38 s from transfer to stable
+     * audio, 2026-08-22).
      *
-     * What stops a one-line correction is that none of the three candidates is safe on the
-     * documentation alone:
-     *  - `audio/mpeg` (current) — a **supported** Cast type, wrong for these bytes, and it
+     * What stops a one-line correction is that no candidate is both accurate and documented.
+     * Against Google's supported-media list (developers.google.com/cast/docs/media, read
+     * 2026-09-17), which lists AAC only inside an MP4 container and mentions neither
+     * `audio/aac`, `audio/aacp` nor raw ADTS at all:
+     *  - `audio/mpeg` (current) — a **listed** Cast type, wrong for these bytes, and it
      *    demonstrably plays once it settles.
-     *  - `audio/aacp` — accurate, but Cast's supported-media list does not mention it, nor raw
-     *    ADTS at all. An unlisted type may simply be refused.
-     *  - `audio/mp4; codecs="mp4a.40.5"` — the documented HE-AAC spelling, but it claims an MP4
-     *    container this stream does not have.
+     *  - `audio/aac` — what the mount itself announces and accurate for these bytes, but
+     *    absent from that list. An unlisted type may simply be refused.
+     *  - `audio/mp4; codecs="mp4a.40.2"` — the documented **LC-AAC** spelling, so the codec
+     *    is finally right, but it claims an MP4 container this raw ADTS stream does not have.
+     *
+     * Ruled out 2026-09-17: `audio/aacp` and `audio/mp4; codecs="mp4a.40.5"`. Both were listed
+     * here as the "accurate" option while the stream was Mad Men Media's HE-AAC mount; `.5` is
+     * the HE-AAC object type and aacp is the HE-AAC spelling, and the ADTS parse shows this
+     * stream is AAC-LC. They now describe the wrong codec, not just the wrong container.
      *
      * So this is a knob, not a conclusion: change the value, cast once, and read the field log
      * for how long it takes to reach `isPlaying=true` after `cast transfer: LOCAL -> REMOTE`.
@@ -554,7 +573,7 @@ object RetroFmConfig {
      *
      * STALE as of the 2026-08-08 CDN switch, and staler after the 2026-09-14 move to Revma: that
      * measurement was taken on Bauer's 192 kbps MP3 relay, and the app has since played Mad Men
-     * Media's 96 kbps AAC+ mount and now Revma's ~128 kbps AAC mount — two different encoders
+     * Media's 96 kbps HE-AAC mount and now Revma's 96 kbps AAC-LC mount — two different encoders
      * behind different processing. The value is deliberately left unchanged rather than
      * guessed — re-measure (`ffmpeg -i <mount> -af ebur128 -f null -` over ~3 min) and set
      * 10^((−14 − integrated)/20), or calibrate by ear against Spotify on the car as before.
