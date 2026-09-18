@@ -15,13 +15,18 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.LoadEventInfo
+import androidx.media3.exoplayer.source.MediaLoadData
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import com.google.android.gms.cast.framework.CastContext
 import com.retrofm.android.data.config.RetroFmConfig
+import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -93,6 +98,7 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
         )
         .setHandleAudioBecomingNoisy(true)
         .build()
+        .also { it.addAnalyticsListener(LoadEventListener()) }
 
     /**
      * The player the [MediaLibrarySession] is built on. When Google Play services and the
@@ -367,6 +373,70 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
         Timber.tag(TAG).d("stream %s — %s", verb, cause)
     }
 
+    /**
+     * Renders the HTTP status behind a failure as " http=404", or "" when the cause was not an
+     * HTTP response at all (a timeout, a dead socket, DNS).
+     *
+     * The stream URL has now moved twice in six weeks — Bauer → Mad Men Media 2026-08-08 →
+     * Revma 2026-09-14 — and both times the symptom in the car was simply silence, with the
+     * field log repeating `player error ERROR_CODE_IO_BAD_HTTP_STATUS`. That code is the same
+     * for every one of them, so it cannot separate "404, the mount is gone, ship a new URL"
+     * from "502, the edge is having a moment, just wait". The 2026-09-14 move was diagnosed by
+     * driving retrofm.se in headless Chromium instead, because the logs could not say it.
+     *
+     * Note what this deliberately does **not** claim: which host answered. The exception
+     * carries the original `DataSpec`, not the redirect target, so on this CDN the status may
+     * well come from an edge node whose name is nowhere in this line. The resolved host is
+     * logged separately by [LoadEventListener], which is the only place it is actually known.
+     */
+    private fun describeHttpStatus(error: Throwable?): String {
+        var cause: Throwable? = error
+        // Bounded: a self-referential cause chain would otherwise spin here, on the error path,
+        // which is the worst possible place to hang.
+        var depth = 0
+        while (cause != null && depth++ < MAX_CAUSE_DEPTH) {
+            if (cause is HttpDataSource.InvalidResponseCodeException) return " http=${cause.responseCode}"
+            cause = cause.cause
+        }
+        return ""
+    }
+
+    /**
+     * Records every load attempt that failed, including the ones the player swallows.
+     *
+     * [DefaultLoadErrorHandlingPolicy] retries six times before any of it reaches
+     * `onPlayerError`, so until now a burst of failures and a single clean failure looked
+     * identical from the sink — the 2026-08-29 investigation into 30 `BUFFERING -> READY` round
+     * trips could not tell a quiet loader retry from a seek, and stalled there.
+     *
+     * This is the one place the **resolved** URI is known: Media3 builds [LoadEventInfo] with
+     * `StatsDataSource.getLastOpenedUri()`, i.e. the host after the 302, so a Revma edge node
+     * is named here and nowhere else. Only the host is logged — the full edge URL carries a
+     * token and would be both long and credential-ish on the wire.
+     *
+     * DEBUG on purpose. A long tunnel can produce six of these per reconnect attempt and the
+     * backoff keeps reconnecting, so at WARN this would be exactly the kind of loop that filled
+     * the 4 KB ingest batches. The decisive fact — the status code — is on the WARN line above.
+     */
+    private inner class LoadEventListener : AnalyticsListener {
+        override fun onLoadError(
+            eventTime: AnalyticsListener.EventTime,
+            loadEventInfo: LoadEventInfo,
+            mediaLoadData: MediaLoadData,
+            error: IOException,
+            wasCanceled: Boolean
+        ) {
+            Timber.tag(TAG).d(
+                "load error %s%s from %s after %d ms%s",
+                error.javaClass.simpleName,
+                describeHttpStatus(error),
+                loadEventInfo.uri.host ?: "?",
+                loadEventInfo.loadDurationMs,
+                if (wasCanceled) " (canceled)" else ""
+            )
+        }
+    }
+
     private fun describePlayer(p: Player): String =
         if (p.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE) "REMOTE" else "LOCAL"
 
@@ -519,8 +589,9 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
 
         override fun onPlayerError(error: PlaybackException) {
             Timber.tag(TAG).w(
-                "player error %s (reconnect attempt %d, playWhenReady=%b)",
-                error.errorCodeName, reconnectAttempts, player.playWhenReady
+                "player error %s%s (reconnect attempt %d, playWhenReady=%b)",
+                error.errorCodeName, describeHttpStatus(error),
+                reconnectAttempts, player.playWhenReady
             )
             wasPlayingBeforeError = player.playWhenReady
             if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
@@ -535,5 +606,8 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
 
     private companion object {
         const val TAG = "Playback"
+
+        /** Depth bound for [describeHttpStatus]'s walk up the cause chain. */
+        const val MAX_CAUSE_DEPTH = 8
     }
 }
