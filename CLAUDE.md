@@ -246,9 +246,50 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
     logs for `cast receiver silent` and `handing playback back`, and whether the hand-back is
     welcome or startling in practice. The episodes are `isPlaying=false` while
     `playWhenReady=true` with `route=REMOTE`.
-  - **The logs never name the receiver.** Neither the transfer lines nor the LOAD payload say
-    which device a session is on, so "analyse these cast sessions" cannot separate a Nest Hub
-    from a speaker. Worth adding the next time this area is touched.
+  - **The receiver is now named on the outbound transfer line** (`receiver=Google Nest Hub`),
+    fixed 2026-09-21 — this note used to say the logs never named it and that it was worth
+    adding the next time the area was touched. It is the **model**, never `friendlyName`: the
+    friendly name is user-chosen and routinely carries a person's name or a room, which the log
+    hygiene rule keeps off the wire, and the model is what the original question ("is this a
+    Nest Hub or a speaker?") actually wanted. Only on the way out: coming back the session is
+    already gone, so the answer would be `unknown` every time.
+  - **A Cast session that dies inside 90 s can be the stream, not the app — measured
+    2026-09-21.** Casting broke completely right after the 2026-09-14 move to Revma, and the
+    diff was the wrong place to look: no Cast file had changed in ten days (`git log --since=…
+    -- '*Cast*'` was empty) and the only behaviour change was `STREAM_URL`. The first hop,
+    `stream.rcs.revma.com`, was refusing almost everything: **43 of 45 requests answered a bare
+    HTTP 503** (no headers, no body) from the dev host over 23 minutes, the last 24 consecutively.
+    Once admitted, the edge node is healthy — one session delivered 1.14 MB in 90 s at a steady
+    ~96 kbps, `content-type: audio/aac`, ICY intact.
+    - **The asymmetry is what turns an upstream wobble into "casting is dead".** Local playback
+      retries indefinitely (`RECONNECT_BACKOFF_MS`, no cap — eleven attempts logged in twelve
+      minutes that morning, and it came back). The Cast path gets **exactly two**: `RELOAD` at
+      `CAST_STALL_RECOVER_MS`, `HAND_BACK` at `CAST_STALL_HANDBACK_MS`, then the session is
+      ended and the user must cast again by hand. At a ~4 % admission rate the phone always gets
+      in eventually and the receiver essentially never does. Giving the watchdog more attempts
+      before the hand-back is the obvious lever and is **not** implemented — the hand-back exists
+      to get audio off a dead receiver, so lengthening it trades one failure mode for the other
+      and needs a decision, not a tweak.
+    - The shapes either side of the move, from the field logs: sessions of 35 min, 15 min,
+      36 min, ~3 h and 69 min on 2026-08-22→29, against 86 s, 89 s and 13 s on 2026-09-20. The
+      line `cast session ended without us asking` appears nowhere in August.
+    - **What the log now carries so the next one needs no CDN probe** (added 2026-09-21):
+      `cast receiver error <type>/<reason> code=N`, straight from the receiver's own
+      `onMediaError` — at WARN on purpose, since the sink's level resets to WARN on every
+      redeploy and a diagnostic that only exists at DEBUG is absent when it is needed — and the
+      receiver's state on both escalation lines, which separates "it tried and failed"
+      (`playerState=IDLE idleReason=ERROR`) from "it is still trying" (`playerState=BUFFERING`).
+      `CastReceiverStatus` renders them and is pure so `:core`'s suite can reach it;
+      `CastReceiverProbe` holds the gms half and is constructed **only** on the Cast path,
+      because `:automotive` strips that group.
+    - **Ruled out as the cause, so nobody fixes them blind:** `CAST_CONTENT_TYPE` (`audio/mpeg`
+      was equally wrong all through the working period, and the receiver rarely gets far enough
+      to see the bytes); CORS (`Access-Control-Allow-Origin: *` on both hops); and the
+      `rj-ttl=5` token (the same edge URL still answered 200 when re-used after 95 s).
+    - **Not our probing.** The phone logged `http=503` at 07:00:10, sixteen minutes before the
+      first dev-host request, and the car had hit the same status on 2026-09-16. Whether the 503
+      is capacity, a listener cap or a mount being wound down is **unknown** and not answerable
+      from here — it is station-side, and worth a note to the station if it persists.
   - Media3's `CastPlayer` has **no veto on the local→remote transfer**: `setTransferCallback`
     hands you `transferState(from, to)` *while* the switch happens. So "don't switch back to a
     receiver that isn't ready" is not implementable, and the hand-back above is what actually

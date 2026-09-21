@@ -66,6 +66,17 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
 
     private val appContext = context.applicationContext
 
+    /**
+     * Reads the receiver's side of a Cast failure; null on every build that has no Cast.
+     *
+     * Assigned inside the branch that builds the [CastPlayer] rather than here, because
+     * [CastReceiverProbe] touches `com.google.android.gms` and `:automotive` strips that group
+     * — constructing it unconditionally would fail class verification on the car. It must also
+     * be declared *before* [player], whose initializer assigns it: a property initializer that
+     * ran afterwards would overwrite the assignment with null.
+     */
+    private var castProbe: CastReceiverProbe? = null
+
     private val exoPlayer: ExoPlayer = ExoPlayer.Builder(
         context,
         DefaultMediaSourceFactory(
@@ -129,11 +140,31 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
                     // or refuse it — the recovery for a receiver that will not start is the
                     // stall watchdog below.
                     .setTransferCallback { from, to ->
-                        Timber.tag(TAG).i(
-                            "cast transfer: %s -> %s (state=%d playWhenReady=%b)",
-                            describePlayer(from), describePlayer(to),
-                            from.playbackState, from.playWhenReady
-                        )
+                        val fromRemote = describePlayer(from) == "REMOTE"
+                        val toRemote = describePlayer(to) == "REMOTE"
+                        // The receiver's model closes a gap CLAUDE.md has carried since
+                        // 2026-08-23: neither this line nor the LOAD payload said which device
+                        // a session was on, so a Nest Hub and a speaker could not be told apart
+                        // afterwards. Only on the way out — coming back the session is already
+                        // gone and the answer would be "unknown" every time.
+                        if (toRemote) {
+                            Timber.tag(TAG).i(
+                                "cast transfer: %s -> %s (state=%d playWhenReady=%b) receiver=%s",
+                                describePlayer(from), describePlayer(to),
+                                from.playbackState, from.playWhenReady,
+                                castProbe?.deviceModel() ?: "unknown"
+                            )
+                        } else {
+                            Timber.tag(TAG).i(
+                                "cast transfer: %s -> %s (state=%d playWhenReady=%b)",
+                                describePlayer(from), describePlayer(to),
+                                from.playbackState, from.playWhenReady
+                            )
+                        }
+                        // Watch the receiver for exactly as long as it has the audio. Attaching
+                        // here rather than on a SessionManagerListener keeps the whole Cast
+                        // lifecycle on the one seam this class already owns.
+                        if (toRemote) castProbe?.attach() else castProbe?.detach()
                         CastPlayer.TransferCallback.DEFAULT.transferState(from, to)
                         // DEFAULT carries playWhenReady across, which is right coming FROM the
                         // phone and wrong coming back TO it: the receiver streams on its own, so
@@ -142,8 +173,8 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
                         // RetroFmConfig.CAST_RESUME_LOCALLY_ON_SESSION_LOSS for the field case
                         // and for why stopping the cast by hand pauses too.
                         val silence = handOverPolicy.silenceOnHandOver(
-                            fromRemote = describePlayer(from) == "REMOTE",
-                            toRemote = describePlayer(to) == "REMOTE"
+                            fromRemote = fromRemote,
+                            toRemote = toRemote
                         )
                         if (silence && to.playWhenReady) {
                             Timber.tag(TAG).i(
@@ -160,6 +191,10 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
                             .build()
                     )
                     .build()
+                    // Only once the CastPlayer exists, so `castProbe != null` means exactly
+                    // "this build casts". Created before the builder it would survive a failed
+                    // build and make "no probe" in a log line mean two different things.
+                    .also { castProbe = CastReceiverProbe(appContext) }
             } catch (e: Exception) {
                 // No Play services / no cast meta-data (e.g. :automotive) → local-only.
                 exoPlayer
@@ -310,6 +345,7 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
         connectivityManager.unregisterNetworkCallback(networkCallback)
         reconnectJob?.cancel()
         castStallJob?.cancel()
+        castProbe?.detach()
         // CastPlayer.release() also releases the wrapped local player (ExoPlayer supports
         // COMMAND_RELEASE), so releasing `player` alone is correct in both the cast and the
         // local-fallback case — no separate exoPlayer.release() (verified for media3 1.10.1).
@@ -475,8 +511,13 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
                 when (castStallWatchdog.due()) {
                     CastStallWatchdog.Action.NONE -> if (!castStalled()) return@launch
                     CastStallWatchdog.Action.RELOAD -> {
+                        // The receiver's own state belongs on this line, not a separate one:
+                        // "silent 45 s" alone cannot say whether the receiver failed to fetch
+                        // the stream (IDLE/ERROR) or is still trying (BUFFERING), which is the
+                        // distinction the 2026-09-21 investigation had to get from the CDN.
                         Timber.tag(TAG).w(
-                            "cast receiver silent %d s — re-loading the stream", stalledSeconds
+                            "cast receiver silent %d s — re-loading the stream (%s)",
+                            stalledSeconds, castProbe?.describe() ?: "no probe"
                         )
                         // Reuse the error path's notion of "playback was wanted", so a later
                         // failure lands in the same reconnect machinery, not a parallel one.
@@ -487,8 +528,8 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
                     }
                     CastStallWatchdog.Action.HAND_BACK -> {
                         Timber.tag(TAG).w(
-                            "cast receiver still silent %d s — handing playback back to this device",
-                            stalledSeconds
+                            "cast receiver still silent %d s (%s) — handing playback back to this device",
+                            stalledSeconds, castProbe?.describe() ?: "no probe"
                         )
                         handBackToLocal()
                         return@launch
