@@ -18,6 +18,19 @@ android {
             "LOGSINK_KEY",
             "\"${project.findProperty("RETROFM_LOGSINK_KEY") ?: ""}\""
         )
+        // Cloudflare Access service token in front of the sink (home-server
+        // APPLOGS-MIGRATION-DESIGN A4), same handling as the key: RETROFM_LOGSINK_CF_ID and
+        // RETROFM_LOGSINK_CF_SECRET, from CI's secrets. Blank = not sent (the client needs both).
+        buildConfigField(
+            "String",
+            "LOGSINK_CF_ID",
+            "\"${project.findProperty("RETROFM_LOGSINK_CF_ID") ?: ""}\""
+        )
+        buildConfigField(
+            "String",
+            "LOGSINK_CF_SECRET",
+            "\"${project.findProperty("RETROFM_LOGSINK_CF_SECRET") ?: ""}\""
+        )
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

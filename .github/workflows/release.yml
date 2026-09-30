@@ -46,6 +46,8 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEYSTORE_KEY_ALIAS }}
           KEY_PW: ${{ secrets.RETROFM_UPLOAD_KEY_PASSWORD }}
           LOGSINK_KEY: ${{ secrets.LOGSINK_KEY }}
+          LOGSINK_CF_ID: ${{ secrets.LOGSINK_CF_ID }}
+          LOGSINK_CF_SECRET: ${{ secrets.LOGSINK_CF_SECRET }}
         run: |
           chmod +x ./gradlew
           ./gradlew :app:bundleRelease :automotive:bundleRelease \
@@ -54,6 +56,8 @@ jobs:
             -PRETROFM_UPLOAD_KEY_ALIAS="$KEY_ALIAS" \
             -PRETROFM_UPLOAD_KEY_PASSWORD="$KEY_PW" \
             -PRETROFM_LOGSINK_KEY="$LOGSINK_KEY" \
+            -PRETROFM_LOGSINK_CF_ID="$LOGSINK_CF_ID" \
+            -PRETROFM_LOGSINK_CF_SECRET="$LOGSINK_CF_SECRET" \
             -PRETROFM_PHONE_VERSION_CODE="$((100 + GITHUB_RUN_NUMBER))" \
             -PRETROFM_AUTO_VERSION_CODE="$((1100 + GITHUB_RUN_NUMBER))"
 

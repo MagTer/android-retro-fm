@@ -58,6 +58,9 @@ class RetroFmApplication : Application() {
             val client = LogsinkClient(
                 ingestUrl = RetroFmConfig.LOGSINK_INGEST_URL,
                 apiKey = key,
+                // Past Cloudflare Access to the sink; blank values send nothing.
+                accessClientId = BuildConfig.LOGSINK_CF_ID,
+                accessClientSecret = BuildConfig.LOGSINK_CF_SECRET,
                 // Tells the phone's lines apart from the car's in the sink.
                 device = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
                 // Survives the car being parked while offline — see RetroFmConfig for the
