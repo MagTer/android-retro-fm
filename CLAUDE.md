@@ -977,8 +977,16 @@ against third-party APIs, and never scrape a signed endpoint belonging to anothe
 ## Field logs
 
 The app ships logs to a remote sink; read them for car/phone debugging (the car has no adb). The
-DEBUG level is set via `applogs.falle.se/admin` (Entra-gated) and **resets to WARN on every
-redeploy** of the log infra, so re-enable DEBUG before an investigation. The exact query recipe
+DEBUG level is set via `applogs.falle.se/admin` (behind Cloudflare Access, members of the
+operator's `applogs` Entra group) and **resets to WARN on every redeploy** of the log infra, so
+re-enable DEBUG before an investigation.
+- **Since 2026-09-30 the sink runs on home-server's Kubernetes cluster behind Cloudflare Access**
+  (home-server `docs/planning/APPLOGS-MIGRATION-DESIGN.md`). `/ingest` is no longer public: a
+  request needs the `applogs-ingest` service token (`LOGSINK_CF_ID` / `LOGSINK_CF_SECRET` CI
+  secrets → `RETROFM_LOGSINK_CF_*` → BuildConfig) as well as the app key. **A build without
+  them ships nothing**, and says nothing either: Access answers 302, which the client drops
+  like a 401. Builds before 1.0.66 have no token and are silent against the new sink. The
+  token is extractable from the APK, like the key; it only gets a request past Access. The exact query recipe
 (SSH → VictoriaLogs) is in the maintainer's personal notes, not the repo.
 
 - The log client (`se.falle.logsink` in `:core`) is **vendored verbatim** from
