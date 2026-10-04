@@ -990,18 +990,20 @@ The app ships logs and three metrics over **OpenTelemetry** (OTLP/HTTP protobuf)
 `docs/planning/TELEMETRY-DESIGN.md` (signed off 2026-10-04), built 2026-10-04.
 
 - **Where it lands:** logs in VictoriaLogs `logs-apps` (30 d), metrics in VictoriaMetrics
-  `metrics-apps` (90 d), both in Grafana — lab `https://logs-lab.falle.se`, production
-  `logs.falle.se` once home-server U9 exists. Queries: logs `service.name:retro-fm` (add
+  `metrics-apps` (90 d), both in Grafana — production `https://logs.falle.se` (home-server
+  U9, 2026-10-04), lab `https://logs-lab.falle.se`. Queries: logs `service.name:retro-fm` (add
   `tag:Playback`, `session.id:<id>`); metrics `{service_name="retro-fm"}`, e.g.
   `retrofm_playback_errors_total`, `retrofm_rebuffer_total`,
   `retrofm_stream_connect_seconds_bucket`.
-- **Ingest:** `RETROFM_TELEMETRY_URL` (lab `https://ingest-lab.falle.se`; production
-  `https://ingest.falle.se` does not exist until U9). Every request carries the source key and
+- **Ingest:** `RETROFM_TELEMETRY_URL` (production `https://ingest.falle.se` since home-server
+  U9, 2026-10-04; lab `https://ingest-lab.falle.se`). Every request carries the source key and
   the Cloudflare Access service token (`RETROFM_TELEMETRY_KEY`, `RETROFM_TELEMETRY_CF_ID`,
   `RETROFM_TELEMETRY_CF_SECRET` → BuildConfig; CI secrets `TELEMETRY_*`). **The CI secrets hold
-  the LAB values** (copied from the dev host's properties 2026-10-04, operator's decision, so
-  1.0.67 could ship to internal testing before production existed): Play builds report to
-  `ingest-lab.falle.se` until the operator swaps the four secrets for production after U9.
+  the PRODUCTION values since 2026-10-04 18:47 UTC** (the operator piped them from home-server's
+  ops into `gh secret set`, never displayed): release builds from then on report to
+  `ingest.falle.se`. Builds released before that (1.0.67's first Play upload) carry the LAB
+  values and report to `ingest-lab.falle.se` for as long as they are installed. The local
+  `local.properties` is separate and names whichever edge the operator last put there.
   `gh secret list` shows when each was last set; it cannot show which edge they name. **A blank URL or key builds an app with telemetry off** — no
   exporter, no thread, no file, no request (`TelemetryTest` pins it). The edge stamps
   `service.name` from the key; what the app sends there is ignored.
@@ -1013,8 +1015,9 @@ The app ships logs and three metrics over **OpenTelemetry** (OTLP/HTTP protobuf)
   it restarts (the source declaration's own comment), so re-check the level before an
   investigation rather than assuming it is still DEBUG.
 - **The old pipeline is retired from this repo** (applogs.falle.se, logsink-shim, the vendored
-  `se.falle.logsink` client). Builds up to 1.0.66 still post there (1.0.67 is the first on the edge); home-server keeps that stack
-  running untouched until the first release on the edge ships, then removes it (U11). Its
+  `se.falle.logsink` client). **Removed 2026-10-04** (home-server U11, ADR-013): applogs is gone
+  from both clusters, `applogs.falle.se` no longer resolves, and `logsink-clients` is archived.
+  Builds up to 1.0.66 post to a name that does not exist (1.0.67 is the first on the edge). Its
   history is in `git log -- core/src/main/java/se/falle/logsink`.
 
 How the client is built (`core/.../telemetry/`), and why — each is what the old client learned,
@@ -1072,9 +1075,13 @@ moved over, or a property of the edge contract:
   `edge accepting`, `edge refused <code>: <why>`, `edge unavailable (...)`, once per change, never
   shipped (it would loop). A gap in the store is explained in the store by `telemetry buffer
   overflow: dropped N records on device` and `spool: replayed N records from a previous process`.
-- **Not yet observed on a device** (2026-10-04): the JVM suite drives the whole pipeline
-  against a fake edge, but the first debug build against the lab edge is the operator's. Until
-  that has shipped records and metrics, "the edge accepts what this client sends" is unproven.
+- **Observed on a device** (2026-10-04, Pixel 10 Pro, 1.0.67): records and the three metrics
+  reached the lab edge, then production's at DEBUG, 55 records accepted = 55 stored with `seq`
+  contiguous (home-server TELEMETRY-DESIGN §10). **The SDK measures itself unless told not to**:
+  `PeriodicMetricReader` defaults to `InternalTelemetryVersion.LATEST` and then exports
+  `otel.sdk.metric_reader.collection.duration`, which the edge drops as undeclared (its v0.2.0
+  log named it). Pinned to LEGACY; `TelemetryTest` flushes twice, because the self-metric
+  first appears in the export AFTER a collection, which is how a one-flush test passed.
 
 Lessons from the old pipeline, kept because the mechanisms still apply:
 

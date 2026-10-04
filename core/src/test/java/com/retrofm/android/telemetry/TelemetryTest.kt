@@ -228,6 +228,11 @@ class TelemetryTest {
         t.playbackSink.rebuffer(PlaybackMeter.ROUTE_LOCAL)
         t.playbackSink.error("io_bad_http_status", "5xx")
         t.flush()
+        // A second collection: the SDK records its own reader's collection time AFTER a
+        // collect, so a self-metric first appears in the next export. One flush passed
+        // while production received otel.sdk.metric_reader.collection.duration
+        // (home-server's edge v0.2.0 named it, 2026-10-04).
+        t.flush()
 
         val metrics = synchronized(metricBodies) {
             metricBodies.flatMap { r -> r.resourceMetricsList.flatMap { rm -> rm.scopeMetricsList.flatMap { it.metricsList } } }

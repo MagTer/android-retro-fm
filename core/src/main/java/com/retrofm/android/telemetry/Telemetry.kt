@@ -9,6 +9,7 @@ import io.opentelemetry.api.metrics.LongCounter
 import io.opentelemetry.exporter.internal.otlp.logs.LogsRequestMarshaler
 import io.opentelemetry.exporter.internal.otlp.metrics.MetricsRequestMarshaler
 import io.opentelemetry.sdk.common.CompletableResultCode
+import io.opentelemetry.sdk.common.InternalTelemetryVersion
 import io.opentelemetry.sdk.logs.SdkLoggerProvider
 import io.opentelemetry.sdk.logs.data.LogRecordData
 import io.opentelemetry.sdk.logs.export.BatchLogRecordProcessor
@@ -146,6 +147,12 @@ class Telemetry private constructor(
         .registerMetricReader(
             PeriodicMetricReader.builder(QueueMetricExporter(metricQueue))
                 .setInterval(limits.metricExportIntervalMs, TimeUnit.MILLISECONDS)
+                // LEGACY: the SDK's default (LATEST) makes the reader measure itself into
+                // this provider as otel.sdk.metric_reader.collection.duration, a name the
+                // edge does not admit, so every export carried points it then dropped.
+                // Under LEGACY the reader is never handed a meter (read from 1.65.0's
+                // bytecode, PeriodicMetricReader.setMeterProvider).
+                .setInternalTelemetryVersion(InternalTelemetryVersion.LEGACY)
                 .build()
         )
         .build()
