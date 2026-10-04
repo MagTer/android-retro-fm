@@ -998,8 +998,11 @@ The app ships logs and three metrics over **OpenTelemetry** (OTLP/HTTP protobuf)
 - **Ingest:** `RETROFM_TELEMETRY_URL` (lab `https://ingest-lab.falle.se`; production
   `https://ingest.falle.se` does not exist until U9). Every request carries the source key and
   the Cloudflare Access service token (`RETROFM_TELEMETRY_KEY`, `RETROFM_TELEMETRY_CF_ID`,
-  `RETROFM_TELEMETRY_CF_SECRET` → BuildConfig; CI secrets `TELEMETRY_*`, which the operator sets
-  for production after U9). **A blank URL or key builds an app with telemetry off** — no
+  `RETROFM_TELEMETRY_CF_SECRET` → BuildConfig; CI secrets `TELEMETRY_*`). **The CI secrets hold
+  the LAB values** (copied from the dev host's properties 2026-10-04, operator's decision, so
+  1.0.67 could ship to internal testing before production existed): Play builds report to
+  `ingest-lab.falle.se` until the operator swaps the four secrets for production after U9.
+  `gh secret list` shows when each was last set; it cannot show which edge they name. **A blank URL or key builds an app with telemetry off** — no
   exporter, no thread, no file, no request (`TelemetryTest` pins it). The edge stamps
   `service.name` from the key; what the app sends there is ignored.
 - **Level:** the steady state is WARN. The operator raises it at the ingest host's `/admin`; the
@@ -1010,7 +1013,7 @@ The app ships logs and three metrics over **OpenTelemetry** (OTLP/HTTP protobuf)
   it restarts (the source declaration's own comment), so re-check the level before an
   investigation rather than assuming it is still DEBUG.
 - **The old pipeline is retired from this repo** (applogs.falle.se, logsink-shim, the vendored
-  `se.falle.logsink` client). Builds up to 1.0.66 still post there; home-server keeps that stack
+  `se.falle.logsink` client). Builds up to 1.0.66 still post there (1.0.67 is the first on the edge); home-server keeps that stack
   running untouched until the first release on the edge ships, then removes it (U11). Its
   history is in `git log -- core/src/main/java/se/falle/logsink`.
 
