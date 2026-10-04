@@ -121,7 +121,7 @@ Paket på hög nivå (fil-för-fil-listor rostar — se källträdet för detalj
 core/       com.retrofm.android.data      (api, config, model, repository, di)
             com.retrofm.android.playback  (spelare/session, ICY/reklamdetektering,
                                            albumkonst-ContentProvider, media-träd)
-            se.falle.logsink              (vendorerad loggklient — se CLAUDE.md)
+            com.retrofm.android.telemetry (OpenTelemetry-loggar och -mätvärden — se CLAUDE.md)
 app/        com.retrofm.android.ui        (Compose-UI, ViewModel, tema)
 automotive/ enbart manifest + resurser    (all kod kommer från :core)
 ```

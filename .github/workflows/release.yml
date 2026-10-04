@@ -45,9 +45,12 @@ jobs:
           STORE_PW: ${{ secrets.RETROFM_UPLOAD_STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEYSTORE_KEY_ALIAS }}
           KEY_PW: ${{ secrets.RETROFM_UPLOAD_KEY_PASSWORD }}
-          LOGSINK_KEY: ${{ secrets.LOGSINK_KEY }}
-          LOGSINK_CF_ID: ${{ secrets.LOGSINK_CF_ID }}
-          LOGSINK_CF_SECRET: ${{ secrets.LOGSINK_CF_SECRET }}
+          # Telemetry edge (core/build.gradle.kts). Unset secrets expand to blank, and a blank
+          # URL or key builds an app with telemetry OFF — it sends nothing, rather than failing.
+          TELEMETRY_URL: ${{ secrets.TELEMETRY_URL }}
+          TELEMETRY_KEY: ${{ secrets.TELEMETRY_KEY }}
+          TELEMETRY_CF_ID: ${{ secrets.TELEMETRY_CF_ID }}
+          TELEMETRY_CF_SECRET: ${{ secrets.TELEMETRY_CF_SECRET }}
         run: |
           chmod +x ./gradlew
           ./gradlew :app:bundleRelease :automotive:bundleRelease \
@@ -55,9 +58,10 @@ jobs:
             -PRETROFM_UPLOAD_STORE_PASSWORD="$STORE_PW" \
             -PRETROFM_UPLOAD_KEY_ALIAS="$KEY_ALIAS" \
             -PRETROFM_UPLOAD_KEY_PASSWORD="$KEY_PW" \
-            -PRETROFM_LOGSINK_KEY="$LOGSINK_KEY" \
-            -PRETROFM_LOGSINK_CF_ID="$LOGSINK_CF_ID" \
-            -PRETROFM_LOGSINK_CF_SECRET="$LOGSINK_CF_SECRET" \
+            -PRETROFM_TELEMETRY_URL="$TELEMETRY_URL" \
+            -PRETROFM_TELEMETRY_KEY="$TELEMETRY_KEY" \
+            -PRETROFM_TELEMETRY_CF_ID="$TELEMETRY_CF_ID" \
+            -PRETROFM_TELEMETRY_CF_SECRET="$TELEMETRY_CF_SECRET" \
             -PRETROFM_PHONE_VERSION_CODE="$((100 + GITHUB_RUN_NUMBER))" \
             -PRETROFM_AUTO_VERSION_CODE="$((1100 + GITHUB_RUN_NUMBER))"
 

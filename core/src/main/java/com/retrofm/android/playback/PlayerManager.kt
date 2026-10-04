@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.os.SystemClock
 import androidx.media3.cast.CastPlayer
 import androidx.media3.cast.RemoteCastPlayer
 import androidx.media3.common.AudioAttributes
@@ -26,6 +27,8 @@ import androidx.media3.exoplayer.source.MediaLoadData
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import com.google.android.gms.cast.framework.CastContext
 import com.retrofm.android.data.config.RetroFmConfig
+import com.retrofm.android.telemetry.PlaybackMeter
+import com.retrofm.android.telemetry.PlaybackMetricSink
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -33,7 +36,17 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
-class PlayerManager(context: Context, private val scope: CoroutineScope) {
+class PlayerManager(
+    context: Context,
+    private val scope: CoroutineScope,
+    metricSink: PlaybackMetricSink = PlaybackMetricSink.NONE,
+) {
+    /**
+     * The playback metrics, fed from [PlayerEventListener] — the one place that sees every
+     * state, isPlaying and error transition — and from the Cast watchdog's escalations, which
+     * are failures the player itself never reports.
+     */
+    private val meter = PlaybackMeter(metricSink) { SystemClock.elapsedRealtime() }
 
     private var reconnectAttempts = 0
     private var reconnectJob: Job? = null
@@ -425,16 +438,24 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
      * well come from an edge node whose name is nowhere in this line. The resolved host is
      * logged separately by [LoadEventListener], which is the only place it is actually known.
      */
-    private fun describeHttpStatus(error: Throwable?): String {
+    private fun describeHttpStatus(error: Throwable?): String =
+        httpStatusOf(error)?.let { " http=$it" } ?: ""
+
+    /** The HTTP status behind [error], or null when the cause was not an HTTP response. */
+    private fun httpStatusOf(error: Throwable?): Int? {
         var cause: Throwable? = error
         // Bounded: a self-referential cause chain would otherwise spin here, on the error path,
         // which is the worst possible place to hang.
         var depth = 0
         while (cause != null && depth++ < MAX_CAUSE_DEPTH) {
-            if (cause is HttpDataSource.InvalidResponseCodeException) return " http=${cause.responseCode}"
+            if (cause is HttpDataSource.InvalidResponseCodeException) return cause.responseCode
             cause = cause.cause
         }
-        return ""
+        return null
+    }
+
+    private fun feedMeter() {
+        meter.update(player.playWhenReady, player.playbackState, player.isPlaying, onRemoteRoute())
     }
 
     /**
@@ -522,6 +543,7 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
                         // Reuse the error path's notion of "playback was wanted", so a later
                         // failure lands in the same reconnect machinery, not a parallel one.
                         wasPlayingBeforeError = true
+                        meter.watchdogEscalation(PlaybackMeter.REASON_CAST_RELOAD)
                         noteStreamAction("prepare", "cast stall watchdog re-load")
                         player.prepare()
                         player.play()
@@ -531,6 +553,7 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
                             "cast receiver still silent %d s (%s) — handing playback back to this device",
                             stalledSeconds, castProbe?.describe() ?: "no probe"
                         )
+                        meter.watchdogEscalation(PlaybackMeter.REASON_CAST_HAND_BACK)
                         handBackToLocal()
                         return@launch
                     }
@@ -577,21 +600,25 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
                 reconnectAttempts = 0
             }
             updateCastStallWatchdog()
+            feedMeter()
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             Timber.tag(TAG).i("isPlaying=%b", isPlaying)
             updateCastStallWatchdog()
+            feedMeter()
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             Timber.tag(TAG).d("playWhenReady=%b reason=%d", playWhenReady, reason)
             updateCastStallWatchdog()
+            feedMeter()
         }
 
         // The route itself decides whether the watchdog applies at all.
         override fun onDeviceInfoChanged(deviceInfo: DeviceInfo) {
             updateCastStallWatchdog()
+            feedMeter()
         }
 
         /**
@@ -635,6 +662,7 @@ class PlayerManager(context: Context, private val scope: CoroutineScope) {
                 reconnectAttempts, player.playWhenReady
             )
             wasPlayingBeforeError = player.playWhenReady
+            meter.playerError(error.errorCodeName, httpStatusOf(error))
             if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
                 noteStreamAction("seek+prepare", "fell behind the live window")
                 player.seekToDefaultPosition()

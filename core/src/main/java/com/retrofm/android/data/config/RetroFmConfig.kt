@@ -42,30 +42,36 @@ object RetroFmConfig {
     const val LOGO_PNG_URL =
         "https://media.bauerradio.com/image/upload/c_crop,g_custom/v1592840994/brand_manager/stations/dwxxo0kehcboelrutfnm.png"
 
-    /** Remote log sink ingest (ADR-011, home-server repo). Key comes via BuildConfig. */
-    const val LOGSINK_INGEST_URL = "https://applogs.falle.se/ingest"
-
     /**
-     * Durable log spool (LogsinkClient's opt-in `spoolFile`). The car's modem drops repeatedly
-     * mid-drive — field logs show "network lost" several times a day — and the in-memory buffer
-     * dies with the process when the car is parked while offline, which is exactly why a drive's
-     * tail never reaches the sink.
+     * Telemetry spool (`com.retrofm.android.telemetry.LogSpool`). The car's modem drops
+     * repeatedly mid-drive — field logs show "network lost" several times a day — and records
+     * held in memory die with the process when the car is parked while offline, which is
+     * exactly why a drive's tail never reached the store before the first spool.
      *
-     * Kill switch: set false and ship. An earlier consumer-side spool took logging down
-     * completely (see the client's KDoc), so this must stay trivially revocable without code
-     * surgery. If the sink ever shows one line per boot and then silence, flip this first.
+     * Kill switch: set false and ship. An earlier consumer-side spool (DiskLogTree, 1.0.28) took
+     * logging down completely, so this must stay trivially revocable without code surgery. If
+     * the store ever shows one line per boot and then silence, flip this first.
      */
     const val LOG_SPOOL_ENABLED = true
 
-    const val LOG_SPOOL_FILE_NAME = "logsink-spool.ndjson"
+    /** Directory under `filesDir`. */
+    const val LOG_SPOOL_DIR_NAME = "telemetry-spool"
+
+    /**
+     * Left on devices by the pre-OpenTelemetry client's spool; deleted once at startup, never
+     * read — its NDJSON lines were for an ingest that no longer exists.
+     */
+    const val LEGACY_SPOOL_FILE_NAME = "logsink-spool.ndjson"
 
     /**
      * Deliberately conservative for the car: the head unit's SSD is expensive to replace and
      * the hardware is slow. With these numbers a normal online drive writes **nothing**, and a
-     * 30 min stretch entirely without coverage costs at most ~15 writes of ≤64 KB — under 1 MB.
-     * Even a pessimistic 2 MB/day is well under a gigabyte a year.
+     * 30 min stretch entirely without coverage costs at most ~15 appends of what was logged
+     * since the last one, inside a folder capped at 128 KB (the library evicts its oldest file).
+     * The cap is protobuf, not the old NDJSON; how many records 128 KB holds against the old
+     * 64 KB of lines has not been measured (2026-10-04).
      */
-    const val LOG_SPOOL_MAX_BYTES = 64 * 1024
+    const val LOG_SPOOL_MAX_BYTES = 128 * 1024
     const val LOG_SPOOL_MIN_WRITE_INTERVAL_MS = 120_000L
     const val LOG_SPOOL_MAX_REPLAY_LINES = 500
 

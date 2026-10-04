@@ -29,6 +29,7 @@ import com.retrofm.android.data.api.ArtworkLookup
 import com.retrofm.android.data.api.StationNowPlaying
 import com.retrofm.android.data.config.RetroFmConfig
 import com.retrofm.android.data.model.TrackInfo
+import com.retrofm.android.telemetry.PlaybackMetricSink
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -97,12 +98,16 @@ class RetroFmPlaybackService : MediaLibraryService() {
 
     // On AAOS this app has no activity, so the Application's ON_STOP flush never fires in
     // the car — playback stopping / service destruction are the only end-of-drive signals.
-    private val logsinkClient get() = (application as? RetroFmApplication)?.logsinkClient
+    private val telemetry get() = (application as? RetroFmApplication)?.telemetry
 
     override fun onCreate() {
         super.onCreate()
         Timber.tag("Lifecycle").i("service onCreate")
-        playerManager = PlayerManager(this, serviceScope)
+        playerManager = PlayerManager(
+            this,
+            serviceScope,
+            telemetry?.playbackSink ?: PlaybackMetricSink.NONE,
+        )
         // playerManager.player is the unified CastPlayer on the phone build (local+remote),
         // or plain ExoPlayer where Cast is unavailable — see PlayerManager.player.
         playerManager.player.addListener(PlaybackStateListener())
@@ -161,12 +166,12 @@ class RetroFmPlaybackService : MediaLibraryService() {
         playerManager.release()
         // Last chance to ship the tail of the session before the process goes quiet.
         // serviceScope is already cancelled, so ride the process-lifecycle scope.
-        logsinkClient?.let { client ->
+        telemetry?.let { t ->
             ProcessLifecycleOwner.get().lifecycleScope.launch {
-                client.flush()
+                t.flush()
                 // Service teardown is the car's end-of-drive signal; persist whatever the
                 // flush could not ship so a park without coverage is not a blind spot.
-                client.persistNow()
+                t.persistNow()
             }
         }
         super.onDestroy()
@@ -570,10 +575,10 @@ class RetroFmPlaybackService : MediaLibraryService() {
                 scheduleStaleInfoReset()
                 // Playback stopping is often the last event of a drive; ship what we have
                 // while the process is still alive instead of waiting out the flush interval.
-                logsinkClient?.let { client ->
+                telemetry?.let { t ->
                     serviceScope.launch {
-                        client.flush()
-                        client.persistNow()
+                        t.flush()
+                        t.persistNow()
                     }
                 }
             }

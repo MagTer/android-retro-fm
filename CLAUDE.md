@@ -23,7 +23,8 @@ export ANDROID_HOME=~/android-sdk
   only as good as the last local run. Gradle marks it `UP-TO-DATE` and skips it when nothing
   changed; pass `--rerun` when you need the run itself as evidence.
 - It covers the pure logic only: artwork ranking, StreamTitle parsing, the browse tree, the
-  artwork host allowlist, the freeze clock. `RetroFmPlaybackService` has **no** test harness, so
+  artwork host allowlist, the freeze clock — plus the telemetry client end to end against a fake
+  edge (MockWebServer), which is the one place it exercises a real socket. `RetroFmPlaybackService` has **no** test harness, so
   anything that matters inside it belongs in an extracted class (that is why `TrackPlayingClock`
   exists) or it is untested.
 
@@ -34,6 +35,13 @@ export ANDROID_HOME=~/android-sdk
 - Release signing is driven by Gradle properties (`RETROFM_UPLOAD_*`, from `~/.gradle/gradle.properties`
   or `-P`). Absent them, the release bundle is produced **unsigned** — never generate a keystore
   or commit secrets.
+- Telemetry is driven the same way (`RETROFM_TELEMETRY_URL`, `_KEY`, `_CF_ID`, `_CF_SECRET`; see
+  "Field logs"). When set in `~/.gradle/gradle.properties`, **every** local build — debug and
+  release — talks to the edge they name; absent, it has telemetry off and says so once, in
+  logcat (`Telemetry: telemetry off — …`). Check by name, never by value: `grep -oE '^RETROFM_TELEMETRY_[A-Z_]+'
+  ~/.gradle/gradle.properties`.
+- New OpenTelemetry classes can need R8 rules that only a release build reveals; they live in
+  `core/consumer-rules.pro`, which both apps inherit.
 
 ## Release (do not hand-upload)
 
@@ -194,8 +202,9 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
   wider audience.** If this ever goes beyond the private circle, it needs a single shared relay
   fanning out to clients, and a courtesy note to Mad Men Media — the same objection that ruled
   out the Blazor circuit. It sits under the same licensing caveat as ad muting, above.
-- **Log hygiene is a wire contract.** Field logs leave the device via the remote sink (Timber +
-  LogsinkTree); never log tokens, credentialed URLs, or PII.
+- **Log hygiene is a wire contract.** Field logs leave the device via OpenTelemetry (Timber +
+  `TelemetryTree`, so every Timber call site is on the wire); never log tokens, credentialed
+  URLs, or PII. Reviewed across all call sites 2026-10-04.
 - Live stream: reconnect retries indefinitely while playback is wanted and recovers on *validated*
   internet (`NET_CAPABILITY_VALIDATED`), reopening at the live edge — no stale buffer, no hard
   give-up. Don't reintroduce a fixed reconnect cap.
@@ -976,31 +985,79 @@ against third-party APIs, and never scrape a signed endpoint belonging to anothe
 
 ## Field logs
 
-The app ships logs to a remote sink; read them for car/phone debugging (the car has no adb). The
-DEBUG level is set via `applogs.falle.se/admin` (behind Cloudflare Access, members of the
-operator's `applogs` Entra group) and **resets to WARN on every redeploy** of the log infra, so
-re-enable DEBUG before an investigation.
-- **Since 2026-09-30 the sink runs on home-server's Kubernetes cluster behind Cloudflare Access**
-  (home-server `docs/planning/APPLOGS-MIGRATION-DESIGN.md`). `/ingest` is no longer public: a
-  request needs the `applogs-ingest` service token (`LOGSINK_CF_ID` / `LOGSINK_CF_SECRET` CI
-  secrets → `RETROFM_LOGSINK_CF_*` → BuildConfig) as well as the app key. **A build without
-  them ships nothing**, and says nothing either: Access answers 302, which the client drops
-  like a 401. Builds before 1.0.66 have no token and are silent against the new sink. The
-  token is extractable from the APK, like the key; it only gets a request past Access. The exact query recipe
-(SSH → VictoriaLogs) is in the maintainer's personal notes, not the repo.
+The app ships logs and three metrics over **OpenTelemetry** (OTLP/HTTP protobuf) to home-server's
+**telemetry edge**; read them for car/phone debugging (the car has no adb). Unit U7 of home-server
+`docs/planning/TELEMETRY-DESIGN.md` (signed off 2026-10-04), built 2026-10-04.
 
-- The log client (`se.falle.logsink` in `:core`) is **vendored verbatim** from
-  `github.com/MagTer/logsink-clients` — never edit it only here. Change upstream first, then
-  re-vendor the files with the new commit hash in their 3-line header (the rest must stay
-  byte-identical to upstream).
-- **Durable spool** (client `spoolFile`, wired in `RetroFmApplication`, knobs and kill switch
-  `RetroFmConfig.LOG_SPOOL_*`). The car's modem drops repeatedly mid-drive; the in-memory buffer
-  survives that, but not the process being killed at park while still offline — which is why a
-  drive's tail never reached the sink. The spool closes only that gap.
+- **Where it lands:** logs in VictoriaLogs `logs-apps` (30 d), metrics in VictoriaMetrics
+  `metrics-apps` (90 d), both in Grafana — lab `https://logs-lab.falle.se`, production
+  `logs.falle.se` once home-server U9 exists. Queries: logs `service.name:retro-fm` (add
+  `tag:Playback`, `session.id:<id>`); metrics `{service_name="retro-fm"}`, e.g.
+  `retrofm_playback_errors_total`, `retrofm_rebuffer_total`,
+  `retrofm_stream_connect_seconds_bucket`.
+- **Ingest:** `RETROFM_TELEMETRY_URL` (lab `https://ingest-lab.falle.se`; production
+  `https://ingest.falle.se` does not exist until U9). Every request carries the source key and
+  the Cloudflare Access service token (`RETROFM_TELEMETRY_KEY`, `RETROFM_TELEMETRY_CF_ID`,
+  `RETROFM_TELEMETRY_CF_SECRET` → BuildConfig; CI secrets `TELEMETRY_*`, which the operator sets
+  for production after U9). **A blank URL or key builds an app with telemetry off** — no
+  exporter, no thread, no file, no request (`TelemetryTest` pins it). The edge stamps
+  `service.name` from the key; what the app sends there is ignored.
+- **Level:** the steady state is WARN. The operator raises it at the ingest host's `/admin`; the
+  app reads `GET /v1/config` at start and every flush interval (30 s, from the same answer) and
+  applies it **on the device** (`SeverityGate`): a record below the level is never sent, and
+  nothing is sent before the first answer — records wait in memory/spool and are judged then.
+  So DEBUG takes effect within one flush interval of the change. The edge returns to WARN when
+  it restarts (the source declaration's own comment), so re-check the level before an
+  investigation rather than assuming it is still DEBUG.
+- **The old pipeline is retired from this repo** (applogs.falle.se, logsink-shim, the vendored
+  `se.falle.logsink` client). Builds up to 1.0.66 still post there; home-server keeps that stack
+  running untouched until the first release on the edge ships, then removes it (U11). Its
+  history is in `git log -- core/src/main/java/se/falle/logsink`.
+
+How the client is built (`core/.../telemetry/`), and why — each is what the old client learned,
+moved over, or a property of the edge contract:
+
+- **The SDK's own `OtlpHttp*Exporter` is not used, on purpose.** Its OkHttp sender follows
+  redirects (OkHttp's default; read in opentelemetry-java 1.66.0, 2026-10-04), so Access's
+  302-to-login reads as a 200 and the batch is silently lost; and it has no answer to 413 but
+  failure. `EdgeClient` never follows a redirect and treats any 3xx as an auth refusal;
+  `EdgeQueue` owns the rest: 401/302 drop and back off at the cap, 403/415/422 drop, 413 halves
+  the batch (never the same bytes twice), 429 waits out `Retry-After`, 5xx and transport errors
+  back off exponentially, and a validated network flushes past the backoff. The marshalers are
+  the SDK's `exporter.internal` API, pinned with the BOM.
+- **Timber stays the call-site API; `TelemetryTree` bridges it, not `android-log`.** That
+  instrumentation captures every `android.util.Log` in the APK, libraries included, which were
+  not written to the log-hygiene contract below — ExoPlayer logs data-source URIs, and this
+  CDN's edge URL carries a token. The tree also strips URL queries/userinfo as a backstop.
+- **`session.id` and `seq` are record attributes**, replacing `sid`/`seq`. OTel has no gap
+  signal of its own (the batch processor drops silently when full), so a hole in `seq` within
+  one `session.id` is the only evidence of loss. Never a resource attribute: the edge counts
+  metric series, and a per-process resource attribute would mint new ones every start.
+- **Metrics** (`PlaybackMeter`, fed from `PlayerManager`'s listener): `retrofm_stream_connect_seconds`
+  {cause=start|reconnect, route=local|remote}, `retrofm_rebuffer_total` {route},
+  `retrofm_playback_errors_total` {reason, http_class} — `reason` is the Media3 error-code name,
+  plus `cast_stall_reload`/`cast_stall_hand_back` for the watchdog's escalations, which
+  `onPlayerError` never sees. **The names are a shipped contract**: the edge admits exactly these
+  three (home-server `clusters/base/telemetry/sources/retro-fm.yaml`) and drops any other, so a
+  new metric is a change there first. VictoriaMetrics' Prometheus naming leaves them unchanged
+  (the unit suffix and `total` are already in the name — its `sanitize.go`, read 2026-10-04 on
+  upstream main, not on the lab's pinned version). Budget: 500 series a day; this set is ~70.
+  Cumulative temporality; metric points are buffered in memory only, not spooled — a process
+  killed while offline loses its unsent points, i.e. the increments of that window (a new
+  process starts its counters at zero, which `rate()`/`increase()` treat as a reset).
+- **Durable spool** (`LogSpool`, opentelemetry-disk-buffering's file storage; knobs and kill
+  switch `RetroFmConfig.LOG_SPOOL_*`). The car's modem drops repeatedly mid-drive; the in-memory
+  buffer survives that, but not the process being killed at park while still offline — which is
+  why a drive's tail never reached the sink before the first spool. The spool closes only that gap.
   - It is a last resort, not a mirror: **nothing touches disk on the logging path**, and a
-    normal online drive writes nothing at all. Disk is touched only after a flush has actually
-    failed (≥2 min apart, skipped when nothing new was logged) and at teardown via
-    `persistNow()`. Budget: ~15 writes of ≤64 KB per half-hour with no coverage.
+    normal online drive writes nothing at all (`TelemetryTest` pins it). Disk is touched only
+    after a flush has actually failed (≥2 min apart, only records not written before) and at
+    teardown via `persistNow()`.
+  - **The library's own wiring is deliberately not used.** opentelemetry-android core
+    (1.7.0-alpha, read 2026-10-04) writes *every* batch to disk before sending it, and its reader
+    deletes a batch whose re-export failed on the next pass (`deleteItemsOnIteration` default +
+    a cached iterator) — continuous writes online, loss offline. Here the storage is iterated
+    with deletion off and each record removed only once it is in memory.
   - A first attempt (`DiskLogTree`, 1.0.28) **took logging down completely** — one line per boot,
     then silence, worse each restart. It appended every line synchronously on the logging thread
     and replayed an ever-growing backlog on the main thread inside `Application.onCreate`, so
@@ -1008,9 +1065,16 @@ re-enable DEBUG before an investigation.
     per-line I/O, main-thread replay, or an uncapped file.
   - If that signature ever returns, flip `LOG_SPOOL_ENABLED` to false and ship — that is what
     it is for.
-- The shim (`github.com/MagTer/logsink-shim`) **allowlists ingest fields server-side** — a new
-  per-line field the client sends also needs a shim allowlist entry, release and redeploy
-  before it reaches VictoriaLogs (it is silently stripped until then).
+- **Where the client says what it is doing:** logcat tag `Telemetry` — `remote level X -> Y`,
+  `edge accepting`, `edge refused <code>: <why>`, `edge unavailable (...)`, once per change, never
+  shipped (it would loop). A gap in the store is explained in the store by `telemetry buffer
+  overflow: dropped N records on device` and `spool: replayed N records from a previous process`.
+- **Not yet observed on a device** (2026-10-04): the JVM suite drives the whole pipeline
+  against a fake edge, but the first debug build against the lab edge is the operator's. Until
+  that has shipped records and metrics, "the edge accepts what this client sends" is unproven.
+
+Lessons from the old pipeline, kept because the mechanisms still apply:
+
 - **A silent sink is not necessarily the app's fault — check the edge.** On 2026-08-09 the car
   shipped 20 lines at boot and then nothing for 40 minutes, while its config polls kept
   succeeding every 5 min. Cause was three hops away: Traefik's `public-buffering` middleware
