@@ -141,6 +141,14 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
     all — so the accurate value may simply be refused while the wrong one demonstrably plays.
     `RetroFmConfig.CAST_CONTENT_TYPE` is the knob and carries the three candidates; change it,
     cast once, and measure the gap between `cast transfer: LOCAL -> REMOTE` and `isPlaying=true`.
+    - **On trial as `audio/aac` since 1.0.69 (2026-10-05)**, because "costs nothing yet measured"
+      stopped being true on Revma. With `audio/mpeg`, 3 of 3 transfers to a Nest Hub on 1.0.68
+      went READY + `isPlaying=true` ~1.6 s after the LOAD, back to BUFFERING 0.5 s later, and
+      stayed silent until the watchdog's 45 s re-load — which then played within 0.7 s. No
+      `cast receiver error`, and the first hop answered 302 on every probe that evening. That
+      the wrong type explains it is a **hypothesis**: the next cast's field log settles it. If
+      the stall survives unchanged, the type is cleared and the receiver's own CDN requests
+      (bot protection / admission — the operator's earlier theory) are what is left.
   - **Latent and unfixed: `nudgeCastToLiveEdge` can re-LOAD the receiver with the wrong item.**
     When it fires against a receiver sitting in `STATE_IDLE`, `play()` goes through
     `PlayGatedPlayer`'s IDLE branch into `prepare()`, and the resulting second LOAD carried the
@@ -291,9 +299,11 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
       `CastReceiverStatus` renders them and is pure so `:core`'s suite can reach it;
       `CastReceiverProbe` holds the gms half and is constructed **only** on the Cast path,
       because `:automotive` strips that group.
-    - **Ruled out as the cause, so nobody fixes them blind:** `CAST_CONTENT_TYPE` (`audio/mpeg`
-      was equally wrong all through the working period, and the receiver rarely gets far enough
-      to see the bytes); CORS (`Access-Control-Allow-Origin: *` on both hops); and the
+    - **Ruled out as the cause of the 503 episode, so nobody fixes them blind:**
+      `CAST_CONTENT_TYPE` (`audio/mpeg` was equally wrong all through the working period, and
+      the receiver rarely got far enough to see the bytes — but that period was HE-AAC on Mad
+      Men's mount; on Revma's AAC-LC the receiver *does* reach the bytes and then stalls, which
+      is why the type is on trial again, see the contentType note above); CORS (`Access-Control-Allow-Origin: *` on both hops); and the
       `rj-ttl=5` token (the same edge URL still answered 200 when re-used after 95 s).
     - **Not our probing.** The phone logged `http=503` at 07:00:10, sixteen minutes before the
       first dev-host request, and the car had hit the same status on 2026-09-16. Whether the 503

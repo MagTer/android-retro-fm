@@ -42,8 +42,8 @@ class RetroFmMediaItemConverter : MediaItemConverter {
             .setStreamType(MediaInfo.STREAM_TYPE_LIVE)
             .setStreamDuration(MediaInfo.UNKNOWN_DURATION)
             // Cast's notion of the content, from one documented place — see
-            // RetroFmConfig.CAST_CONTENT_TYPE, which records that this is knowingly wrong
-            // for the actual bytes and why correcting it needs a measurement first.
+            // RetroFmConfig.CAST_CONTENT_TYPE, which records why no candidate is both accurate
+            // and documented, and which value is currently on trial.
             .setContentType(RetroFmConfig.CAST_CONTENT_TYPE)
             .setMetadata(info.metadata)
             .apply {

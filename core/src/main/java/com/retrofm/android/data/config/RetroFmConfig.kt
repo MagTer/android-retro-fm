@@ -314,8 +314,8 @@ object RetroFmConfig {
     const val ICY_HELD_MAX_AGE_MS = 30_000L
 
     /**
-     * `contentType` announced to the Cast receiver. **Known to be wrong, deliberately left
-     * alone until it can be measured — do not "fix" it blind.**
+     * `contentType` announced to the Cast receiver. **`audio/aac` is a trial, set 2026-10-05
+     * (1.0.69) on a measurement — not a settled answer.**
      *
      * The mount actually serves raw ADTS **AAC-LC** as `audio/aac` (headers read live
      * 2026-09-16, codec measured from the ADTS frames 2026-09-17 — see [STREAM_URL]). We
@@ -328,10 +328,10 @@ object RetroFmConfig {
      * Against Google's supported-media list (developers.google.com/cast/docs/media, read
      * 2026-09-17), which lists AAC only inside an MP4 container and mentions neither
      * `audio/aac`, `audio/aacp` nor raw ADTS at all:
-     *  - `audio/mpeg` (current) — a **listed** Cast type, wrong for these bytes, and it
+     *  - `audio/mpeg` (until 1.0.68) — a **listed** Cast type, wrong for these bytes, and it
      *    demonstrably plays once it settles.
-     *  - `audio/aac` — what the mount itself announces and accurate for these bytes, but
-     *    absent from that list. An unlisted type may simply be refused.
+     *  - `audio/aac` (current, trial) — what the mount itself announces and accurate for these
+     *    bytes, but absent from that list. An unlisted type may simply be refused.
      *  - `audio/mp4; codecs="mp4a.40.2"` — the documented **LC-AAC** spelling, so the codec
      *    is finally right, but it claims an MP4 container this raw ADTS stream does not have.
      *
@@ -340,6 +340,16 @@ object RetroFmConfig {
      * the HE-AAC object type and aacp is the HE-AAC spelling, and the ADTS parse shows this
      * stream is AAC-LC. They now describe the wrong codec, not just the wrong container.
      *
+     * Why the trial (field log, Pixel 10 Pro → Nest Hub, 1.0.68, 2026-10-05): with `audio/mpeg`
+     * **every** transfer had the same shape — LOAD, receiver READY with `isPlaying=true` after
+     * ~1.6 s, BUFFERING 0.5 s later, then silence until [CAST_STALL_RECOVER_MS] re-loaded it,
+     * after which it played within 0.7 s (3 of 3 transfers). The receiver reported no media
+     * error, and the stream's first hop answered 302 on every probe that evening, so the
+     * September admission failures (503) were not what it was hitting. That the wrong type
+     * fits "plays once it settles" is the hypothesis being tested, nothing more. If the stall
+     * survives `audio/aac` unchanged, the type is cleared and the receiver's own requests to
+     * the CDN (bot protection / admission) are the remaining suspect.
+     *
      * So this is a knob, not a conclusion: change the value, cast once, and read the field log
      * for how long it takes to reach `isPlaying=true` after `cast transfer: LOCAL -> REMOTE`.
      * A regression shows up immediately as a receiver that never leaves BUFFERING.
@@ -347,7 +357,7 @@ object RetroFmConfig {
      * This is Cast's notion of the content, not the player's: [MediaItemTree]'s `mimeType`
      * feeds ExoPlayer's local extractor choice and is a separate decision.
      */
-    const val CAST_CONTENT_TYPE = "audio/mpeg"
+    const val CAST_CONTENT_TYPE = "audio/aac"
 
     /**
      * How long the Cast receiver may sit "playback wanted, nothing playing" before the stream
