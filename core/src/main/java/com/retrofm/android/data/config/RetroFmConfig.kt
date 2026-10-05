@@ -290,6 +290,13 @@ object RetroFmConfig {
      * stream can't honor — the receiver stalls until something seeks it to the live edge
      * (field-tested: a manual pause/resume unstuck it). Long enough for the LOAD to settle,
      * short enough to feel like normal connect time.
+     *
+     * **Now a backstop, not the fix (2026-10-05).** The position is no longer handed over at
+     * all — `PlayerManager`'s transfer callback crosses with the default position. The nudge
+     * also turned out to be blind on Revma: it samples `isPlaying` once, and the receiver
+     * reports a ~0.5 s READY window that straddled the 2 s mark in 3 of 3 transfers, so it
+     * never fired and the 45 s watchdog did the rescue instead. On Mad Men's mount it did
+     * fire, which is why casting used to start in ~3 s.
      */
     const val CAST_LIVE_EDGE_NUDGE_DELAY_MS = 2_000L
 
@@ -349,6 +356,12 @@ object RetroFmConfig {
      * fits "plays once it settles" is the hypothesis being tested, nothing more. If the stall
      * survives `audio/aac` unchanged, the type is cleared and the receiver's own requests to
      * the CDN (bot protection / admission) are the remaining suspect.
+     *
+     * **Result, 1.0.69 (2026-10-05 22:59): no change.** The receiver accepted `audio/aac` and
+     * stalled exactly as before — READY +1.6 s, BUFFERING 0.47 s later, re-load at 45 s. One
+     * transfer, but identical to the tenth of a second, so the type is cleared as the cause.
+     * The cause was the handed-over playback position (see [CAST_LIVE_EDGE_NUDGE_DELAY_MS]).
+     * `audio/aac` is kept because it is accurate and demonstrably accepted.
      *
      * So this is a knob, not a conclusion: change the value, cast once, and read the field log
      * for how long it takes to reach `isPlaying=true` after `cast transfer: LOCAL -> REMOTE`.

@@ -141,14 +141,33 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
     all — so the accurate value may simply be refused while the wrong one demonstrably plays.
     `RetroFmConfig.CAST_CONTENT_TYPE` is the knob and carries the three candidates; change it,
     cast once, and measure the gap between `cast transfer: LOCAL -> REMOTE` and `isPlaying=true`.
-    - **On trial as `audio/aac` since 1.0.69 (2026-10-05)**, because "costs nothing yet measured"
-      stopped being true on Revma. With `audio/mpeg`, 3 of 3 transfers to a Nest Hub on 1.0.68
+    - **Set to `audio/aac` in 1.0.69 (2026-10-05) as a trial, and the trial cleared it**: the
+      receiver accepted the type and stalled identically (one transfer, same timings to the
+      tenth of a second). It is kept because it is accurate. The cause was the handed-over
+      position — see "A transfer must not carry the local position" below. The trial's
+      motivation, kept as the record: With `audio/mpeg`, 3 of 3 transfers to a Nest Hub on 1.0.68
       went READY + `isPlaying=true` ~1.6 s after the LOAD, back to BUFFERING 0.5 s later, and
       stayed silent until the watchdog's 45 s re-load — which then played within 0.7 s. No
       `cast receiver error`, and the first hop answered 302 on every probe that evening. That
       the wrong type explains it is a **hypothesis**: the next cast's field log settles it. If
       the stall survives unchanged, the type is cleared and the receiver's own CDN requests
       (bot protection / admission — the operator's earlier theory) are what is left.
+  - **A transfer must not carry the local position — this is what made Cast slow after the
+    move to Revma (fixed 1.0.70, 2026-10-05).** Media3's `TransferCallback.DEFAULT` is
+    `PlayerTransferState.fromPlayer(from).setToPlayer(to)`, i.e. `setMediaItems(items, index,
+    from.currentPosition)` (read from the 1.10.1 bytecode), so the receiver was LOADed at
+    "however long the phone had been playing" on an unseekable live stream. On 1.0.68/69 every
+    transfer to a Nest Hub went READY ~1.6 s after the LOAD, BUFFERING 0.5 s later, silent until
+    the 45 s watchdog re-load, which then played in 0.7 s (4 of 4 stalled at 45 s, 3 of them logged at DEBUG, 2026-10-05).
+    - It was always so; **`nudgeCastToLiveEdge` hid it.** That 2 s seek-to-live-edge existed for
+      exactly this stall and is why casting used to start in ~3 s (the 2026-08-22 measurement
+      above has it "firing in both cases"). It samples `isPlaying` **once**, and on Revma the
+      receiver's 0.5 s READY window straddled the 2 s mark in 3 of 3 transfers — so it never
+      fired. A one-shot check of a flapping state is not a check.
+    - The transfer callback now crosses TO the receiver with `C.TIME_UNSET` (live edge) and logs
+      `cast transfer: dropping local position N ms`. The nudge stays as a backstop. **Not yet
+      observed on a device** as of the commit — the next cast's log decides: success is
+      `isPlaying=true` within a few seconds of `LOCAL -> REMOTE` and no `cast receiver silent`.
   - **Latent and unfixed: `nudgeCastToLiveEdge` can re-LOAD the receiver with the wrong item.**
     When it fires against a receiver sitting in `STATE_IDLE`, `play()` goes through
     `PlayGatedPlayer`'s IDLE branch into `prepare()`, and the resulting second LOAD carried the

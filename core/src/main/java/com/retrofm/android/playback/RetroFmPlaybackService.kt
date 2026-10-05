@@ -664,6 +664,10 @@ class RetroFmPlaybackService : MediaLibraryService() {
      * unseekable live stream can't honor — the receiver stalls buffering until seeked to the
      * live edge (exactly what a manual pause/resume did). If the receiver hasn't started
      * playing shortly after the transfer, seek it to the live edge automatically.
+     *
+     * Since 2026-10-05 the transfer no longer carries the position (PlayerManager's transfer
+     * callback), so this is a backstop. It samples once and can be fooled by the receiver's
+     * brief READY — see [RetroFmConfig.CAST_LIVE_EDGE_NUDGE_DELAY_MS].
      */
     private fun nudgeCastToLiveEdge() {
         serviceScope.launch {

@@ -14,6 +14,7 @@ import androidx.media3.common.DeviceInfo
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.PlayerTransferState
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
@@ -145,7 +146,8 @@ class PlayerManager(
             try {
                 CastPlayer.Builder(context)
                     .setLocalPlayer(exoPlayer)
-                    // Observation only — the state hand-over still runs the default way. The
+                    // Mostly observation — the hand-over runs Media3's way except for the
+                    // position going TO the receiver and playWhenReady coming back. The
                     // route was previously visible just as onDeviceInfoChanged *after* the
                     // fact, which is how a transfer back to a not-yet-ready receiver read as
                     // "the app went silent for no reason" (2026-08-22). There is no veto here:
@@ -178,7 +180,24 @@ class PlayerManager(
                         // here rather than on a SessionManagerListener keeps the whole Cast
                         // lifecycle on the one seam this class already owns.
                         if (toRemote) castProbe?.attach() else castProbe?.detach()
-                        CastPlayer.TransferCallback.DEFAULT.transferState(from, to)
+                        // DEFAULT is PlayerTransferState.fromPlayer(from).setToPlayer(to), which
+                        // calls setMediaItems(items, index, from.currentPosition) — read from the
+                        // 1.10.1 bytecode. On this live stream that position is just how long
+                        // the phone had been playing, and the receiver cannot honour it: it
+                        // reached READY ~1.6 s after the LOAD, fell back to BUFFERING 0.5 s
+                        // later and sat silent until the stall watchdog's re-load, 3 of 3
+                        // transfers on 2026-10-05. Going TO the receiver, cross with the
+                        // default position instead, which for a live item is the live edge.
+                        // Coming back keeps DEFAULT: the local player handles its own position.
+                        val state = PlayerTransferState.builderFromPlayer(from)
+                        if (toRemote) {
+                            Timber.tag(TAG).d(
+                                "cast transfer: dropping local position %d ms, receiver starts at the live edge",
+                                from.currentPosition
+                            )
+                            state.setCurrentPosition(C.TIME_UNSET)
+                        }
+                        state.build().setToPlayer(to)
                         // DEFAULT carries playWhenReady across, which is right coming FROM the
                         // phone and wrong coming back TO it: the receiver streams on its own, so
                         // a phone that walks out of Wi-Fi range loses only the remote control
