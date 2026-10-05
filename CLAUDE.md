@@ -173,11 +173,12 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
       0.5–0.6 s (2 of 2). That asymmetry is what the operator noticed.
     - **So since 1.0.71 the nudge watches instead of sampling** (`CastLiveEdgeNudge`, pinned by
       its test against the 23:22 field timings): every 250 ms from +2 s to +10 s, the first
-      not-playing observation seeks to the live edge, once per transfer. **Not yet observed on
-      a device** as of the commit; success is `receiver stuck N ms after transfer — seeking
-      live edge` around N≈2250 followed by `isPlaying=true` within a second. Whether a seek
-      *during* the stall behaves like the seek from a paused, pre-buffered receiver is the open
-      part — the two fast samples both had 5–13 s of buffering behind them.
+      not-playing observation seeks to the live edge, once per transfer. **Confirmed on 1.0.71,
+      2026-10-05 (2 of 2):** the nudge fired at +2.5 and +2.0 s, READY 0.68 and 0.58 s later,
+      audio at **+3.2 and +2.6 s** from `LOCAL -> REMOTE` against 7.5–7.7 s on 1.0.70. So a seek
+      *during* the stall is as fast as one from a paused, pre-buffered receiver — that was the
+      open question. The cast-first path stayed instant and the nudge correctly did nothing
+      there. n=2 on one Nest Hub; a speaker-only receiver is unmeasured.
   - **Latent and unfixed: `nudgeCastToLiveEdge` can re-LOAD the receiver with the wrong item.**
     When it fires against a receiver sitting in `STATE_IDLE`, `play()` goes through
     `PlayGatedPlayer`'s IDLE branch into `prepare()`, and the resulting second LOAD carried the
