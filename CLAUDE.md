@@ -1024,6 +1024,12 @@ The app ships logs and three metrics over **OpenTelemetry** (OTLP/HTTP protobuf)
   `tag:Playback`, `session.id:<id>`); metrics `{service_name="retro-fm"}`, e.g.
   `retrofm_playback_errors_total`, `retrofm_rebuffer_total`,
   `retrofm_stream_connect_seconds_bucket`.
+- **Reading them from the seat**, without Grafana: `telemetry-query check`, then e.g.
+  `telemetry-query logs logs-apps '_time:1h service.name:retro-fm tag:Playback'` or
+  `telemetry-query metrics metrics-apps 'retrofm_playback_errors_total'`. The tool and its
+  `telemetry-query` skill are installed on the dev seat by home-server (`bootstrap-dev.sh`
+  §8); the skill says how to read an empty answer or an exit 1, and the queries above are
+  the part that belongs to this app.
 - **Ingest:** `RETROFM_TELEMETRY_URL` (production `https://ingest.falle.se` since home-server
   U9, 2026-10-04; lab `https://ingest-lab.falle.se`). Every request carries the source key and
   the Cloudflare Access service token (`RETROFM_TELEMETRY_KEY`, `RETROFM_TELEMETRY_CF_ID`,
