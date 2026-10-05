@@ -291,14 +291,30 @@ object RetroFmConfig {
      * (field-tested: a manual pause/resume unstuck it). Long enough for the LOAD to settle,
      * short enough to feel like normal connect time.
      *
-     * **Now a backstop, not the fix (2026-10-05).** The position is no longer handed over at
-     * all — `PlayerManager`'s transfer callback crosses with the default position. The nudge
-     * also turned out to be blind on Revma: it samples `isPlaying` once, and the receiver
-     * reports a ~0.5 s READY window that straddled the 2 s mark in 3 of 3 transfers, so it
-     * never fired and the 45 s watchdog did the rescue instead. On Mad Men's mount it did
-     * fire, which is why casting used to start in ~3 s.
+     * Since 1.0.70 the position is no longer handed over at all — `PlayerManager`'s transfer
+     * callback crosses with the default position — which removed the 45 s hang but not the
+     * post-LOAD stall: the receiver still went READY, back to BUFFERING 0.5 s later, and found
+     * its own way out only at ~+7.5 s. The nudge used to sample `isPlaying` once at this delay
+     * and the receiver's READY window straddled it in 5 of 5 transfers, so it never fired;
+     * since 1.0.71 this is where [CastLiveEdgeNudge]'s watch *starts*, not a single look. On
+     * Mad Men's mount the one-shot check did fire, which is why casting used to start in ~3 s.
      */
     const val CAST_LIVE_EDGE_NUDGE_DELAY_MS = 2_000L
+
+    /**
+     * How long after a transfer [CastLiveEdgeNudge] keeps watching the receiver. 1.0.70's
+     * receiver found its own way out of the post-LOAD stall at +7.5 and +7.7 s (2026-10-05), so
+     * the stall the nudge exists for ends inside this window either way; anything still silent
+     * after it is [CAST_STALL_RECOVER_MS]'s.
+     */
+    const val CAST_LIVE_EDGE_WATCH_MS = 10_000L
+
+    /**
+     * Poll interval of that watch. The receiver's READY window before the stall lasted
+     * 0.42–0.49 s in the field, so a 250 ms poll sees the fall back to BUFFERING within a
+     * quarter second of it. Only runs for [CAST_LIVE_EDGE_WATCH_MS] after a transfer.
+     */
+    const val CAST_LIVE_EDGE_POLL_MS = 250L
 
     /**
      * How long an ICY frame that arrived before the play press stays usable.

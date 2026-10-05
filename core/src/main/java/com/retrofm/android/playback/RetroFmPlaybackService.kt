@@ -61,6 +61,7 @@ class RetroFmPlaybackService : MediaLibraryService() {
 
     /** Armed by the mount's end-of-track marker; see [armHandoverTimeout]. */
     private var handoverJob: Job? = null
+    private var liveEdgeNudgeJob: Job? = null
 
     /** An announcement that arrived before the play press — see [PendingIcyFrame]. */
     private val pendingIcy = PendingIcyFrame<Metadata>(RetroFmConfig.ICY_HELD_MAX_AGE_MS)
@@ -660,26 +661,44 @@ class RetroFmPlaybackService : MediaLibraryService() {
     }
 
     /**
-     * The transfer to a Cast receiver carries the local playback position, which the
-     * unseekable live stream can't honor — the receiver stalls buffering until seeked to the
-     * live edge (exactly what a manual pause/resume did). If the receiver hasn't started
-     * playing shortly after the transfer, seek it to the live edge automatically.
-     *
-     * Since 2026-10-05 the transfer no longer carries the position (PlayerManager's transfer
-     * callback), so this is a backstop. It samples once and can be fooled by the receiver's
-     * brief READY — see [RetroFmConfig.CAST_LIVE_EDGE_NUDGE_DELAY_MS].
+     * Seeks a freshly connected Cast receiver to the live edge if it stalls right after the
+     * LOAD. A receiver LOADed with autoplay goes READY and falls back to BUFFERING half a second
+     * later; a live-edge seek on a loaded receiver plays in ~0.6 s, while left alone it took
+     * ~7.5 s (2026-10-05). The decision — and why it must watch rather than sample once — is
+     * [CastLiveEdgeNudge]'s; this only feeds it the player and acts on the verdict.
      */
     private fun nudgeCastToLiveEdge() {
-        serviceScope.launch {
+        liveEdgeNudgeJob?.cancel()
+        liveEdgeNudgeJob = serviceScope.launch {
+            val nudge = CastLiveEdgeNudge(
+                armAfterMs = RetroFmConfig.CAST_LIVE_EDGE_NUDGE_DELAY_MS,
+                watchForMs = RetroFmConfig.CAST_LIVE_EDGE_WATCH_MS
+            )
+            val transferredAt = SystemClock.elapsedRealtime()
             delay(RetroFmConfig.CAST_LIVE_EDGE_NUDGE_DELAY_MS)
-            val player = playerManager.player
-            val stillStuckOnRemote =
-                player.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE &&
-                    player.playWhenReady && !player.isPlaying
-            if (stillStuckOnRemote) {
-                Timber.tag("RetroFmCast").i("receiver stuck after transfer — seeking live edge")
-                player.seekToDefaultPosition()
-                player.play()
+            while (isActive) {
+                val player = playerManager.player
+                val sinceMs = SystemClock.elapsedRealtime() - transferredAt
+                when (
+                    nudge.observe(
+                        sinceTransferMs = sinceMs,
+                        remote = player.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE,
+                        playWhenReady = player.playWhenReady,
+                        playing = player.isPlaying
+                    )
+                ) {
+                    CastLiveEdgeNudge.Verdict.WAIT -> delay(RetroFmConfig.CAST_LIVE_EDGE_POLL_MS)
+                    CastLiveEdgeNudge.Verdict.DONE -> return@launch
+                    CastLiveEdgeNudge.Verdict.NUDGE -> {
+                        Timber.tag("RetroFmCast").i(
+                            "receiver stuck %d ms after transfer (state=%d) — seeking live edge",
+                            sinceMs, player.playbackState
+                        )
+                        player.seekToDefaultPosition()
+                        player.play()
+                        return@launch
+                    }
+                }
             }
         }
     }

@@ -165,9 +165,19 @@ Releases go out through GitHub Actions, not manual Play Console uploads:
       receiver's 0.5 s READY window straddled the 2 s mark in 3 of 3 transfers — so it never
       fired. A one-shot check of a flapping state is not a check.
     - The transfer callback now crosses TO the receiver with `C.TIME_UNSET` (live edge) and logs
-      `cast transfer: dropping local position N ms`. The nudge stays as a backstop. **Not yet
-      observed on a device** as of the commit — the next cast's log decides: success is
-      `isPlaying=true` within a few seconds of `LOCAL -> REMOTE` and no `cast receiver silent`.
+      `cast transfer: dropping local position N ms`. **Confirmed on 1.0.70 the same evening:**
+      no `cast receiver silent` in 4 transfers. It removed the 45 s hang, **not the stall**: an
+      autoplay LOAD still went READY at +1.7 s, BUFFERING 0.5 s later, and the receiver found
+      its own way out at ~+7.5 s (2 of 2). Casting first and pressing play later was instant —
+      the receiver LOADs paused, buffers, and the resume-from-pause live-edge seek played in
+      0.5–0.6 s (2 of 2). That asymmetry is what the operator noticed.
+    - **So since 1.0.71 the nudge watches instead of sampling** (`CastLiveEdgeNudge`, pinned by
+      its test against the 23:22 field timings): every 250 ms from +2 s to +10 s, the first
+      not-playing observation seeks to the live edge, once per transfer. **Not yet observed on
+      a device** as of the commit; success is `receiver stuck N ms after transfer — seeking
+      live edge` around N≈2250 followed by `isPlaying=true` within a second. Whether a seek
+      *during* the stall behaves like the seek from a paused, pre-buffered receiver is the open
+      part — the two fast samples both had 5–13 s of buffering behind them.
   - **Latent and unfixed: `nudgeCastToLiveEdge` can re-LOAD the receiver with the wrong item.**
     When it fires against a receiver sitting in `STATE_IDLE`, `play()` goes through
     `PlayGatedPlayer`'s IDLE branch into `prepare()`, and the resulting second LOAD carried the
