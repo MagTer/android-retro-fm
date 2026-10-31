@@ -41,7 +41,8 @@ Gates: `./gradlew :core:testDebugUnitTest`, before and after. They see the comme
 only; each acceptance line is the real check. Docs only, so no release.
 
 ### U1 — `AGENTS.md`, the two skills, the ignore line
-- **Files.** `AGENTS.md`, `CLAUDE.md`, `.claude/skills/{now-playing-metadata,field-logs}/SKILL.md`,
+- **Files.** `AGENTS.md`, `CLAUDE.md`, `.claude/skills/{now-playing-metadata,field-logs}/SKILL.md` (plus the symlinks to it at
+  other clients' project skill paths that agent-config's layout proposal U0 found necessary),
   `.gitignore` (`.agent-state.md`).
 - **Acceptance.** Every `**bold lead**` and heading of the old file is found in AGENTS.md or a
   skill (a list diff, in the commit body); total words moved = words removed ± headers;
