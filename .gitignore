@@ -12,3 +12,6 @@ app/build/
 
 # Log files
 *.log
+
+# Where this checkout stands (the shared agreement's session state); local to this working tree.
+.agent-state.md
