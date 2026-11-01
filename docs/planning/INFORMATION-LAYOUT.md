@@ -1,6 +1,6 @@
 # Information layout: aligning android-retro-fm with the shared rule
 
-**Status 2026-10-29: PLAN, unsigned. Nothing below is built.** Origin: operator, 2026-10-29
+**Status: SIGNED by the operator 2026-11-01. Written 2026-10-29 as a plan.** Origin: operator, 2026-10-29
 — *"Vi vill inte tappa information, men det ska hanteras enligt gemensamma rutiner och inte
 bloat'a sessionen. Repots readme i rooten är främst för människor, agents.md är
 projektspecifika tillägg. Vissa saker kanske ska bli projekt-lokala skills."* The rule is
