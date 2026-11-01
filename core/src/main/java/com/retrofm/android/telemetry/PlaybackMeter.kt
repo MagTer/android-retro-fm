@@ -122,9 +122,9 @@ class PlaybackMeter(
                 .joinToString("").take(48).ifEmpty { "unknown" }
 
         /**
-         * The class, not the code: 404-vs-502 is the distinction that matters. This used to cite
-         * CLAUDE.md, but none of its 52 versions in git mentions 502 (searched 2026-11-01), so the
-         * reason is unrecorded.
+         * The class, not the code: 404-vs-502 is the distinction that matters — "the mount is gone,
+         * ship a new URL" against "the edge is having a moment, just wait", which the player's own
+         * error code cannot separate. Why: [PlayerManager.describeHttpStatus]'s KDoc.
          */
         fun httpClassOf(status: Int?): String = when (status) {
             null -> HTTP_NONE

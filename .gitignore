@@ -2,9 +2,10 @@
 .gradle/
 .idea/
 .kotlin/
-.claude/*
-# Project skills are versioned (AGENTS.md, "Project skills"); the rest of .claude/ stays local.
-!.claude/skills/
+# Project skills are versioned (AGENTS.md, "Project skills"); the rest of .claude/ stays
+# local, at the root and in any subdirectory a session was started from.
+**/.claude/*
+!/.claude/skills/
 local.properties
 captures/
 *.hprof
