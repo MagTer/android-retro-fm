@@ -1,6 +1,9 @@
 # Information layout: aligning android-retro-fm with the shared rule
 
-**Status: SIGNED by the operator 2026-11-01. Written 2026-10-29 as a plan.** Origin: operator, 2026-10-29
+**Status: SIGNED by the operator 2026-11-01. Written 2026-10-29 as a plan. Built 2026-11-01:
+U1 1630d70 + def7239, U2 b8b284d. One acceptance line is open — U1's "a fresh session asked
+about a wrong track title loads `now-playing-metadata`", which writes a session transcript under
+`~/.claude` and was left to the conductor. Delete this file when it is met.** Origin: operator, 2026-10-29
 — *"Vi vill inte tappa information, men det ska hanteras enligt gemensamma rutiner och inte
 bloat'a sessionen. Repots readme i rooten är främst för människor, agents.md är
 projektspecifika tillägg. Vissa saker kanske ska bli projekt-lokala skills."* The rule is
