@@ -92,9 +92,10 @@ internal class CastReceiverProbe(private val appContext: Context) {
     /**
      * Which kind of receiver this is — `Chromecast`, `Google Nest Hub`, `Google Home Mini`.
      *
-     * CLAUDE.md has carried "the logs never name the receiver" as a known gap since 2026-08-23,
-     * because neither the transfer lines nor the LOAD payload say which device a session is on
-     * and "analyse these cast sessions" could not separate a Nest Hub from a speaker.
+     * The agent notes (now AGENTS.md, Cast gotchas) carried "the logs never name the receiver" as
+     * a known gap from 2026-08-23, because neither the transfer lines nor the LOAD payload said
+     * which device a session was on and "analyse these cast sessions" could not separate a Nest
+     * Hub from a speaker.
      *
      * The **model**, deliberately, and never `friendlyName`: the friendly name is chosen by the
      * user and routinely carries a person's name or a room, which the log-hygiene rule keeps off

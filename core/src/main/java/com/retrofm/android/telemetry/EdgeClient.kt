@@ -142,7 +142,8 @@ class EdgeClient internal constructor(
             .followRedirects(false)
             .followSslRedirects(false)
             // The car's first request after a modem comes up can need a full retransmitted SYN
-            // series to connect (CLAUDE.md, artwork section); 10 s covers it, and nothing waits.
+            // series to connect (now-playing-metadata skill, "The car's link, not the API, decides
+            // whether art appears"); 10 s covers it, and nothing waits.
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .callTimeout(30, TimeUnit.SECONDS)

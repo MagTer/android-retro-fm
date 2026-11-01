@@ -766,8 +766,9 @@ class RetroFmPlaybackService : MediaLibraryService() {
             //
             // iTunes first, the station's page only when iTunes has nothing. The order was the
             // other way around until 1.0.60 and was reversed on measured evidence, not taste —
-            // see CLAUDE.md: over 37 tracks where the page agreed about the *song* it still
-            // named a worse *record* 15 times to 8, roughly half its albums being compilations,
+            // see the now-playing-metadata skill: over 37 tracks where the page agreed about the
+            // *song* it still named a worse *record* 15 times to 8, roughly half its albums being
+            // compilations,
             // and it produced two outright misattributions (Günther's "Pleasureman" under
             // Samantha Fox; the Tina Turner musical under Tina Turner). The asymmetry decided
             // it: ArtworkLookup.pick has a scoring layer tuned over 123 tracks, the page has

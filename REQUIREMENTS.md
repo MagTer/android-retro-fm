@@ -53,7 +53,7 @@ ICY-injektor frös 2026-07-31 och AAC+-mounten skickar tom titel. Gå inte tillb
 > `radioplay.se/retrofm` ger 404 och `nowplaying/res` svarar `[]`. Hela lagret (`RetroFmApi`,
 > `NowPlayingRepository`, `NetworkModule`, DTO:erna) togs bort 2026-08-08 när appen bytte till
 > stationens egen Icecast, där metadatan ligger i strömmen. **Nu-spelas kräver inget API alls** —
-> se `TrackInfo.fromStreamTitle` och avsnittet om CDN-bytet i `CLAUDE.md`. Beskrivningen nedan
+> se `TrackInfo.fromStreamTitle` och avsnittet om CDN-bytet i `.claude/skills/now-playing-metadata/SKILL.md`. Beskrivningen nedan
 > dokumenterar hur integrationen såg ut när den fungerade.
 
 RadioPlay:s webbplats (`https://radioplay.se/retrofm`) renderade nu-spelas-data serversidigt i sin `__NEXT_DATA__`. Den dynamiska källan identifierades som:

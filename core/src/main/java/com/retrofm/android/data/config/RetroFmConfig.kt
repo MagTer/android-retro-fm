@@ -11,8 +11,8 @@ object RetroFmConfig {
      * 2026-09-16): the station moved from Mad Men Media's Icecast to **Revma (RCS)**. The old
      * mount `stream.madmenmedia.se/retro` went 404 when every Mad Men mount except Relax FM was
      * renamed `<mount>_old` on 2026-09-14 ~20:00 UTC; `/retro_old` still carried the programme
-     * two days later, but the `_old` name says it can vanish any day. See CLAUDE.md, "The station
-     * moved to a new CDN".
+     * two days later, but the `_old` name says it can vanish any day. See the now-playing-metadata
+     * skill (`.claude/skills/now-playing-metadata/SKILL.md`), "The station moved to a new CDN".
      *
      * The URL 302-redirects to an edge node with a short-lived token (`rj-ttl=5`); ExoPlayer's
      * DefaultHttpDataSource follows this, re-sending the request headers on the hop, so ICY

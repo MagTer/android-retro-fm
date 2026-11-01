@@ -157,8 +157,8 @@ class PlayerManager(
                     .setTransferCallback { from, to ->
                         val fromRemote = describePlayer(from) == "REMOTE"
                         val toRemote = describePlayer(to) == "REMOTE"
-                        // The receiver's model closes a gap CLAUDE.md has carried since
-                        // 2026-08-23: neither this line nor the LOAD payload said which device
+                        // The receiver's model closes a gap the agent notes (AGENTS.md) carried
+                        // since 2026-08-23: neither this line nor the LOAD payload said which device
                         // a session was on, so a Nest Hub and a speaker could not be told apart
                         // afterwards. Only on the way out — coming back the session is already
                         // gone and the answer would be "unknown" every time.

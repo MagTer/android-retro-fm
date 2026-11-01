@@ -121,7 +121,11 @@ class PlaybackMeter(
                 .map { if (it in 'a'..'z' || it in '0'..'9') it else '_' }
                 .joinToString("").take(48).ifEmpty { "unknown" }
 
-        /** The class, not the code: 404-vs-502 is the distinction that matters (CLAUDE.md). */
+        /**
+         * The class, not the code: 404-vs-502 is the distinction that matters. This used to cite
+         * CLAUDE.md, but none of its 52 versions in git mentions 502 (searched 2026-11-01), so the
+         * reason is unrecorded.
+         */
         fun httpClassOf(status: Int?): String = when (status) {
             null -> HTTP_NONE
             in 400..499 -> "4xx"

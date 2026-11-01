@@ -16,9 +16,11 @@ En dedikerad Android-app för att lyssna på Retro FM utan att gå via aggregera
   (kan stängas av via `RetroFmConfig.MUTE_ADS`).
 - Låtinfo kommer från strömmens egen ICY-metadata, exakt vid låtbytet. Sedan 2026-08-08 spelar
   appen stationens egen Icecast (Mad Men Media) i stället för Bauers gamla relä, vars metadata
-  frös i juli när Retro FM lämnade Bauer/RadioPlay. Inget API pollas längre. Se `CLAUDE.md`.
-- Skickar fältloggar till en privat loggsink för felsökning i bil (produktionsbilar saknar
-  adb) — aldrig tokens, credential-URL:er eller PII (se `CLAUDE.md`).
+  frös i juli när Retro FM lämnade Bauer/RadioPlay. Inget API pollas längre. Sedan 2026-09-14 är
+  strömmen Revma (RCS). Historik och mätningar: `.claude/skills/now-playing-metadata/SKILL.md`.
+- Skickar fältloggar och mätvärden över OpenTelemetry till home-servers telemetri-edge för
+  felsökning i bil (produktionsbilar saknar adb) — aldrig tokens, credential-URL:er eller PII
+  (se `AGENTS.md`, "Log hygiene is a wire contract", och `.claude/skills/field-logs/SKILL.md`).
 
 ## Teknikstack
 
@@ -83,7 +85,7 @@ både `app/` och `automotive/build.gradle.kts`, tagga `vX.Y.Z` (samma som versio
 pusha taggen. Workflowen bygger, signerar och laddar upp båda bundlarna till Play internal
 testing (telefon → spåret `internal`, automotive → `automotive:internal`). `versionCode`
 härleds automatiskt från körningsnumret och ska aldrig bumpas för hand. Detaljer och
-fallgropar finns i `CLAUDE.md`.
+fallgropar finns i `AGENTS.md`, avsnittet "Release".
 
 För lokala release-byggen: `:app`/`:automotive` har en signaturkonfiguration som läser
 uppgifter från Gradle-properties — **inga hemligheter ligger i repot**. Utan properties byggs
@@ -121,7 +123,7 @@ Paket på hög nivå (fil-för-fil-listor rostar — se källträdet för detalj
 core/       com.retrofm.android.data      (api, config, model, repository, di)
             com.retrofm.android.playback  (spelare/session, ICY/reklamdetektering,
                                            albumkonst-ContentProvider, media-träd)
-            com.retrofm.android.telemetry (OpenTelemetry-loggar och -mätvärden — se CLAUDE.md)
+            com.retrofm.android.telemetry (OpenTelemetry-loggar och -mätvärden — se skillen field-logs)
 app/        com.retrofm.android.ui        (Compose-UI, ViewModel, tema)
 automotive/ enbart manifest + resurser    (all kod kommer från :core)
 ```
