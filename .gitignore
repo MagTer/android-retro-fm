@@ -2,7 +2,9 @@
 .gradle/
 .idea/
 .kotlin/
-.claude/
+.claude/*
+# Project skills are versioned (AGENTS.md, "Project skills"); the rest of .claude/ stays local.
+!.claude/skills/
 local.properties
 captures/
 *.hprof
