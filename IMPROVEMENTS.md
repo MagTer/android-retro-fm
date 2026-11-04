@@ -175,7 +175,7 @@ Non-functional: startup-within-2 s is helped by eager `prepare()` but at a data 
 3. **AAOS product flavor** (`automotive` dimension) for eventual Play distribution.
 4. **"Recently played" view** using the (fixed) playlist endpoint — already anticipated in REQUIREMENTS.md §3.
 5. **AAC stream fallback** — REQUIREMENTS.md lists the AAC+ URL; use it as automatic fallback if the MP3 URL starts failing (their URLs are undocumented and may change; RetroFmConfig centralization is already in place).
-6. README overclaims ("Återansluter automatiskt vid nätverksavbrott") — keep README in sync with actual behavior after P0-2.
+6. README overclaims ("Reconnects automatically after network drops") — keep README in sync with actual behavior after P0-2.
 
 ## Suggested execution order for Sonnet 5
 
