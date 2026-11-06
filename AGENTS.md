@@ -32,9 +32,9 @@ export ANDROID_HOME=~/android-sdk
 ./gradlew :app:bundleRelease :automotive:bundleRelease
 ```
 
-- **`:core:testDebugUnitTest` is the whole test suite** and it is JVM-only. It does not run in
-  CI — `.github/workflows/release.yml` builds bundles and nothing else — so a green suite is
-  only as good as the last local run. Gradle marks it `UP-TO-DATE` and skips it when nothing
+- **`:core:testDebugUnitTest` is the whole test suite** and it is JVM-only. It runs in CI on every
+  PR and on main since 2026-11-06 (`.github/workflows/ci.yml`); `release.yml` builds bundles
+  and nothing else, so a tag proves no tests by itself. Gradle marks it `UP-TO-DATE` and skips it when nothing
   changed; pass `--rerun` when you need the run itself as evidence.
 - It covers the pure logic only: artwork ranking, StreamTitle parsing, the browse tree, the
   artwork host allowlist, the freeze clock — plus the telemetry client end to end against a fake
