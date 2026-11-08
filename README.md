@@ -1,3 +1,9 @@
+---
+purpose: An Android app that plays Retro FM without aggregator ads, on phones, Android Auto and Android Automotive.
+owns: [the Retro FM app, its playback and car integration, its field telemetry client]
+does_not_own: [the telemetry edge and its stores (home-server)]
+depends_on: [home-server]
+---
 # Retro FM Android
 
 A dedicated Android app for listening to Retro FM without going through aggregators that add ads before playback. It supports phones, Android Auto projection and Android Automotive OS (AAOS) through Media3's `MediaBrowserService`.
